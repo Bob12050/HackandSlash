@@ -1,0 +1,14 @@
+{
+  "name": "ashen-relics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mobile-first command RPG and loot-hunting game",
+  "scripts": {
+    "dev": "node tools/server.mjs",
+    "test": "node --test",
+    "balance": "node tools/balance.mjs",
+    "check": "node --check src/app.js && node --check src/engine.js && node --check src/renderer.js && node --check src/data.js && node --check src/storage.js && node --check src/audio.js && node --check sw.js && node --check tools/server.mjs && node --check tools/balance.mjs",
+    "validate": "npm run check && npm test"
+  }
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <meta name="theme-color" content="#0b0d12" />
+    <meta name="description" content="コマンドバトルで魔物を倒し、ランダム装備を掘り進めるダークファンタジーRPG。" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+    <title>灰燼の迷宮 — ASHEN RELICS</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <noscript>このゲームを遊ぶにはJavaScriptを有効にしてください。</noscript>
+
+    <div id="orientation-guard" aria-hidden="true">
+      <div class="rotate-mark">↻</div>
+      <strong>端末を縦向きにしてください</strong>
+      <span>この迷宮は縦画面で遊ぶように作られています。</span>
+    </div>
+
+    <main id="app" class="app-shell" aria-live="off">
+      <header id="topbar" class="topbar is-hidden">
+        <button id="back-button" class="icon-button is-hidden" type="button" aria-label="前の画面へ">‹</button>
+        <div class="topbar-title">
+          <small id="eyebrow">ASHEN RELICS</small>
+          <strong id="screen-title">灰燼の迷宮</strong>
+        </div>
+        <div class="currencies" aria-label="所持通貨">
+          <span title="ゴールド"><i class="currency-dot gold"></i><b id="gold-value">0</b></span>
+          <span title="灰片"><i class="currency-dot ember"></i><b id="ember-value">0</b></span>
+        </div>
+        <button id="sound-button" class="icon-button" type="button" aria-label="音声の切り替え">♪</button>
+      </header>
+
+      <section id="screen" class="screen" aria-live="polite"></section>
+      <div id="modal-root"></div>
+      <div id="toast-root" class="toast-root" aria-live="assertive"></div>
+      <p id="sr-live" class="sr-only" aria-live="assertive"></p>
+    </main>
+
+    <template id="title-template">
+      <div class="title-screen view-enter">
+        <div class="title-atmosphere" aria-hidden="true">
+          <span class="ash ash-1"></span><span class="ash ash-2"></span><span class="ash ash-3"></span>
+          <div class="ruin-silhouette"></div>
+        </div>
+        <div class="title-sigil" aria-hidden="true"><span></span></div>
+        <div class="title-copy">
+          <p>COMMAND RPG × LOOT HUNT</p>
+          <h1><span>灰燼の迷宮</span><em>ASHEN RELICS</em></h1>
+          <div class="title-rule"><i></i><b>◆</b><i></i></div>
+          <p class="title-lead">失われた名を求め、灰の底へ。</p>
+        </div>
+        <div class="title-actions">
+          <button class="primary-button" data-action="continue" type="button">つづきから</button>
+          <button class="ghost-button" data-action="new-game" type="button">はじめから</button>
+        </div>
+        <small class="title-version">PROLOGUE BUILD · v0.1</small>
+      </div>
+    </template>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
