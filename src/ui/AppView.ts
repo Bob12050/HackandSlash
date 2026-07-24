@@ -4,6 +4,7 @@ import {
   MAX_ENHANCEMENT_LEVEL,
   getDerivedStats,
   getEnhancementCost,
+  type AdventureAreaId,
   type EquipmentItem,
   type EquipmentSlot,
   type IdleRpgState
@@ -19,6 +20,11 @@ const SLOT_ICONS: Record<EquipmentSlot, string> = {
   weapon: 'fa-wand-sparkles',
   armor: 'fa-shield-halved',
   charm: 'fa-gem'
+};
+
+const AREA_LABELS: Record<AdventureAreaId, string> = {
+  sunmeadow: 'そよかぜ草原',
+  'komorebi-forest': 'こもれび森'
 };
 
 let toastTimer: number | undefined;
@@ -98,14 +104,19 @@ export function mountApp(root: HTMLElement): void {
     if (modal.open && modal.dataset.view === 'forge' && modalContent.dataset.signature !== forgeSignature(state)) {
       refreshModalPreservingFocus(modalContent, () => renderForgeModal(state, modalContent));
     }
+    if (modal.open && modal.dataset.view === 'destination' && modalContent.dataset.signature !== destinationSignature(state)) {
+      refreshModalPreservingFocus(modalContent, () => renderDestinationModal(state, modalContent));
+    }
   });
 
   runtime.onCombat((events) => {
     const loot = events.find((event) => event.type === 'loot');
     const autoSold = events.find((event) => event.type === 'loot-auto-sold');
     const levelUp = events.find((event) => event.type === 'level-up');
+    const areaUnlocked = events.find((event) => event.type === 'area-unlocked');
     const defeat = events.find((event) => event.type === 'hero-defeated');
-    if (loot?.type === 'loot') showToast(`★ ${loot.item.name}を手に入れた！`, `rarity-${loot.item.rarity}`);
+    if (areaUnlocked?.type === 'area-unlocked') showToast(`NEW AREA！ ${areaUnlocked.name}が解放されました`, 'area-unlocked');
+    else if (loot?.type === 'loot') showToast(`★ ${loot.item.name}を手に入れた！`, `rarity-${loot.item.rarity}`);
     else if (autoSold?.type === 'loot-auto-sold') showToast(`荷物がいっぱい。${autoSold.gold}Gで自動売却`, 'level-up');
     else if (levelUp?.type === 'level-up') showToast(`LEVEL UP！ Lv.${levelUp.level}になった`, 'level-up');
     else if (defeat) showToast('ギルドに運ばれました…', 'danger');
@@ -115,7 +126,7 @@ export function mountApp(root: HTMLElement): void {
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
     if (!target) return;
     const action = target.dataset.action;
-    if (action === 'adventure') runtime.startAdventure();
+    if (action === 'adventure') openModal('destination', modal, modalContent, latestState);
     if (action === 'return') runtime.returnToGuild();
     if (action === 'equipment') openModal('equipment', modal, modalContent, latestState);
     if (action === 'status') openModal('status', modal, modalContent, latestState);
@@ -134,6 +145,10 @@ export function mountApp(root: HTMLElement): void {
     const action = element.dataset.modalAction;
     if (element.getAttribute('aria-disabled') === 'true') return;
     if (action === 'close') modal.close();
+    if (action === 'start-area' && element.dataset.areaId) {
+      runtime.startAdventure(element.dataset.areaId as AdventureAreaId);
+      modal.close();
+    }
     if (action === 'equip' && element.dataset.itemId) runtime.equip(element.dataset.itemId);
     if (action === 'sell' && element.dataset.itemId) runtime.sell(element.dataset.itemId);
     if (action === 'enhance' && element.dataset.itemId) {
@@ -167,7 +182,7 @@ function renderState(state: IdleRpgState, actionPanel: HTMLElement): void {
   setText('rank-value', `${state.hero.rank}ランク冒険者`);
   setText('rank-badge', `${state.hero.rank} RANK`);
   setText('gold-value', `${state.hero.gold.toLocaleString()}G`);
-  setText('stage-label', state.mode === 'guild' ? 'ギルド' : 'そよかぜ草原');
+  setText('stage-label', state.mode === 'guild' ? 'ギルド' : (AREA_LABELS[state.selectedArea] ?? AREA_LABELS.sunmeadow));
   setText('stage-mark', state.mode === 'guild' ? 'GUILD' : 'AUTO BATTLE');
 
   const distance = required<HTMLElement>('distance-label');
@@ -207,7 +222,7 @@ function guildActions(state: IdleRpgState): string {
     <div class="primary-actions">
       ${actionButton('equipment', 'fa-shield-halved', '装備', `所持 <span data-inventory-count>${state.inventory.length}/${INVENTORY_LIMIT}</span>`)}
       ${actionButton('status', 'fa-chart-simple', 'ステータス', '能力を確認')}
-      ${actionButton('adventure', 'fa-person-running', '冒険に出る', 'そよかぜ草原へ', 'accent')}
+      ${actionButton('adventure', 'fa-person-running', '冒険に出る', '冒険先を選ぶ', 'accent')}
       ${actionButton('dispatch', 'fa-compass', '遠征', 'Eランクで解放', 'locked')}
     </div>
     <div class="secondary-actions">
@@ -262,9 +277,58 @@ function openModal(
   if (view === 'status') renderStatusModal(state, content);
   if (view === 'quest') renderQuestModal(state, content);
   if (view === 'forge') renderForgeModal(state, content);
+  if (view === 'destination') renderDestinationModal(state, content);
   if (view === 'dispatch') renderInfoModal(content, '遠征', 'fa-compass', 'Eランクになると、仲間を送り出して報酬を受け取れるようになります。');
   if (view === 'menu') renderMenuModal(content);
   if (!modal.open) modal.showModal();
+}
+
+function renderDestinationModal(state: IdleRpgState, content: HTMLElement): void {
+  const meadow = state.areaProgress.sunmeadow;
+  const forestUnlocked = state.unlockedAreas.includes('komorebi-forest');
+  const meadowProgress = Math.min(10, meadow.regularKills);
+  const meadowStatus = meadow.bossDefeated
+    ? '<i class="fa-solid fa-crown" aria-hidden="true"></i> ボス討伐済み'
+    : meadowProgress >= 10
+      ? '<i class="fa-solid fa-crown" aria-hidden="true"></i> ボス出現中！'
+      : `ボスまで <b>${meadowProgress} / 10</b>`;
+
+  content.innerHTML = `
+    ${modalHeader('冒険先を選ぶ', 'fa-map-location-dot', forestUnlocked ? '2 AREAS' : '1 AREA')}
+    <p class="destination-lead">冒険はすべて自動で進みます。行き先を選んだら、あとはリオを見守ろう。</p>
+    <div class="destination-list" aria-label="冒険エリア">
+      <button class="destination-card meadow" data-modal-action="start-area" data-area-id="sunmeadow" type="button">
+        <span class="destination-art" aria-hidden="true"><img src="assets/sunmeadow.png" alt="" /></span>
+        <span class="destination-copy">
+          <span class="destination-heading"><span><small>AREA 01</small><b>そよかぜ草原</b></span><em>冒険する <i class="fa-solid fa-chevron-right" aria-hidden="true"></i></em></span>
+          <span class="destination-description">ぷるぷるスライムが暮らす、やさしい風の草原。</span>
+          <span class="destination-progress-label">${meadowStatus}</span>
+          <span class="destination-progress" aria-hidden="true"><span style="width:${meadowProgress * 10}%"></span></span>
+        </span>
+      </button>
+      <button
+        class="destination-card forest ${forestUnlocked ? '' : 'is-locked'}"
+        data-modal-action="start-area"
+        data-area-id="komorebi-forest"
+        type="button"
+        aria-disabled="${!forestUnlocked}"
+        aria-describedby="forest-area-description"
+      >
+        <span class="destination-art" aria-hidden="true"><img src="assets/komorebi-forest.png" alt="" /></span>
+        <span class="destination-copy">
+          <span class="destination-heading"><span><small>AREA 02</small><b>こもれび森</b></span>${forestUnlocked
+            ? '<em>冒険する <i class="fa-solid fa-chevron-right" aria-hidden="true"></i></em>'
+            : '<em class="lock-badge"><i class="fa-solid fa-lock" aria-hidden="true"></i> LOCK</em>'}</span>
+          <span id="forest-area-description" class="destination-description">${forestUnlocked
+            ? '少し手強い魔物が待つ森。レア装備を見つけやすい。'
+            : '草原の「おおきな王冠スライム」を倒すと解放。'}</span>
+          <span class="destination-reward"><i class="fa-solid ${forestUnlocked ? 'fa-gem' : 'fa-crown'}" aria-hidden="true"></i> ${forestUnlocked ? 'レア装備率アップ' : '草原ボス討伐で解放'}</span>
+        </span>
+      </button>
+    </div>
+    <p class="destination-note"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> 討伐数とエリア解放は帰還しても保存されます</p>
+  `;
+  content.dataset.signature = destinationSignature(state);
 }
 
 function renderEquipmentModal(state: IdleRpgState, content: HTMLElement): void {
@@ -463,16 +527,31 @@ function questSignature(state: IdleRpgState): string {
   return `${state.quest.progress}:${state.quest.claimed}:${state.hero.level}:${state.hero.gold}`;
 }
 
+function destinationSignature(state: IdleRpgState): string {
+  const meadow = state.areaProgress.sunmeadow;
+  const forest = state.areaProgress['komorebi-forest'];
+  return [
+    state.unlockedAreas.join(','),
+    meadow.regularKills,
+    meadow.bossDefeated,
+    forest.regularKills,
+    forest.bossDefeated
+  ].join(':');
+}
+
 function refreshModalPreservingFocus(content: HTMLElement, render: () => void): void {
   const activeElement = document.activeElement instanceof HTMLElement && content.contains(document.activeElement)
     ? document.activeElement
     : null;
   const modalAction = activeElement?.dataset.modalAction;
   const itemId = activeElement?.dataset.itemId;
+  const areaId = activeElement?.dataset.areaId;
   render();
   if (!modalAction) return;
   const nextTarget = [...content.querySelectorAll<HTMLElement>('[data-modal-action]')].find((element) => (
-    element.dataset.modalAction === modalAction && element.dataset.itemId === itemId
+    element.dataset.modalAction === modalAction
+    && element.dataset.itemId === itemId
+    && element.dataset.areaId === areaId
   ));
   const fallback = content.querySelector<HTMLElement>('[data-modal-action="close"]');
   (nextTarget ?? fallback)?.focus({ preventScroll: true });

@@ -12,6 +12,8 @@ import {
   returnToGuild,
   sellItem,
   startAdventure,
+  AREA_BOSS_KILL_TARGET,
+  INVENTORY_LIMIT,
   MAX_ENHANCEMENT_LEVEL,
   type EquipmentItem
 } from '../src/game/idleRpg';
@@ -179,6 +181,171 @@ describe('idle RPG loop', () => {
     expect(returned.distance).toBe(0);
   });
 
+  it('rejects a locked destination and stays at the guild', () => {
+    const base = createInitialState();
+    const state = startAdventure(base, 'komorebi-forest', () => 0);
+
+    expect(state.mode).toBe('guild');
+    expect(state.enemy).toBeNull();
+    expect(state.selectedArea).toBe('sunmeadow');
+    expect(state.logs.at(-1)).toContain('まだ解放されていません');
+  });
+
+  it('keeps meadow progress after returning and spawns the boss after ten regular victories', () => {
+    const base = createInitialState();
+    const almostReady = {
+      ...base,
+      areaProgress: {
+        ...base.areaProgress,
+        sunmeadow: { regularKills: AREA_BOSS_KILL_TARGET - 2, bossDefeated: false }
+      }
+    };
+    const firstRun = startAdventure(almostReady, 'sunmeadow', () => 0);
+    const ninthVictory = performHeroAttack(
+      { ...firstRun, enemy: { ...firstRun.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.99, 0)
+    ).state;
+    const returned = returnToGuild(ninthVictory);
+
+    expect(returned.areaProgress.sunmeadow.regularKills).toBe(AREA_BOSS_KILL_TARGET - 1);
+
+    const secondRun = startAdventure(returned, 'sunmeadow', () => 0);
+    const tenthVictory = performHeroAttack(
+      { ...secondRun, enemy: { ...secondRun.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.99, 0)
+    ).state;
+
+    expect(tenthVictory.areaProgress.sunmeadow.regularKills).toBe(AREA_BOSS_KILL_TARGET);
+    expect(tenthVictory.enemy?.kind).toBe('crown-slime');
+    expect(tenthVictory.enemy?.name).toBe('おおきな王冠スライム');
+  });
+
+  it('starts directly at the meadow boss when its ten victories were saved', () => {
+    const base = createInitialState();
+    const ready = {
+      ...base,
+      areaProgress: {
+        ...base.areaProgress,
+        sunmeadow: { regularKills: AREA_BOSS_KILL_TARGET, bossDefeated: false }
+      }
+    };
+
+    const adventure = startAdventure(ready, 'sunmeadow', () => 0.99);
+    expect(adventure.enemy?.kind).toBe('crown-slime');
+    expect(adventure.enemy?.level).toBe(5);
+  });
+
+  it('unlocks the forest and grants the meadow boss first-clear rewards only once', () => {
+    const base = createInitialState();
+    const ready = {
+      ...base,
+      areaProgress: {
+        ...base.areaProgress,
+        sunmeadow: { regularKills: AREA_BOSS_KILL_TARGET, bossDefeated: false }
+      }
+    };
+    const bossAdventure = startAdventure(ready, 'sunmeadow', () => 0);
+    const boss = bossAdventure.enemy!;
+    const cleared = performHeroAttack(
+      { ...bossAdventure, enemy: { ...boss, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.99, 0)
+    );
+
+    expect(cleared.state.areaProgress.sunmeadow.bossDefeated).toBe(true);
+    expect(cleared.state.unlockedAreas).toContain('komorebi-forest');
+    expect(cleared.state.hero.gold).toBe(boss.gold + 300);
+    expect(cleared.state.inventory.some((item) => item.id === 'first-clear-sunmeadow-charm')).toBe(true);
+    expect(cleared.events).toContainEqual({
+      type: 'area-unlocked', areaId: 'komorebi-forest', name: 'こもれび森'
+    });
+
+    const replayState = {
+      ...cleared.state,
+      enemy: { ...boss, id: 'boss-replay', hp: 1 }
+    };
+    const replayed = performHeroAttack(replayState, rolls(0.9, 0.5, 0, 0.99, 0));
+    expect(replayed.state.hero.gold - cleared.state.hero.gold).toBe(boss.gold);
+    expect(replayed.state.inventory.filter((item) => item.id === 'first-clear-sunmeadow-charm')).toHaveLength(1);
+    expect(replayed.events.some((event) => event.type === 'area-unlocked')).toBe(false);
+  });
+
+  it('keeps the unique first-clear reward when the inventory is full', () => {
+    const base = createInitialState();
+    const fillerItems = Array.from({ length: 29 }, (_, index) => ({
+      id: `boss-reward-filler-${index}`,
+      name: `予備装備${index}`,
+      slot: 'armor' as const,
+      rarity: 'common' as const,
+      attack: 0,
+      defense: 1 + index,
+      maxHp: 0,
+      score: 1 + index,
+      locked: false,
+      upgradeLevel: 0
+    }));
+    const ready = {
+      ...base,
+      inventory: [...base.inventory, ...fillerItems],
+      areaProgress: {
+        ...base.areaProgress,
+        sunmeadow: { regularKills: AREA_BOSS_KILL_TARGET, bossDefeated: false }
+      }
+    };
+    const adventure = startAdventure(ready, 'sunmeadow', () => 0);
+    const cleared = performHeroAttack(
+      { ...adventure, enemy: { ...adventure.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.99, 0)
+    );
+
+    expect(cleared.state.inventory).toHaveLength(INVENTORY_LIMIT);
+    expect(cleared.state.inventory.some((item) => item.id === 'first-clear-sunmeadow-charm')).toBe(true);
+    expect(cleared.state.inventory.some((item) => item.id === 'boss-reward-filler-0')).toBe(false);
+    expect(cleared.events).toContainEqual(expect.objectContaining({
+      type: 'loot-auto-sold', item: expect.objectContaining({ id: 'boss-reward-filler-0' })
+    }));
+  });
+
+  it('makes forest enemies stronger than meadow enemies', () => {
+    const base = createInitialState();
+    const unlocked = { ...base, unlockedAreas: [...base.unlockedAreas, 'komorebi-forest' as const] };
+    const meadow = startAdventure(unlocked, 'sunmeadow', () => 0);
+    const forest = startAdventure(unlocked, 'komorebi-forest', () => 0);
+
+    expect(forest.enemy!.level).toBeGreaterThan(meadow.enemy!.level);
+    expect(forest.enemy!.maxHp).toBeGreaterThan(meadow.enemy!.maxHp);
+    expect(forest.enemy!.attack).toBeGreaterThan(meadow.enemy!.attack);
+    expect(forest.enemy!.gold).toBeGreaterThan(meadow.enemy!.gold);
+  });
+
+  it('gives the forest a higher drop chance and more valuable equipment', () => {
+    const base = createInitialState();
+    const unlocked = { ...base, unlockedAreas: [...base.unlockedAreas, 'komorebi-forest' as const] };
+    const meadow = startAdventure(unlocked, 'sunmeadow', () => 0);
+    const forest = startAdventure(unlocked, 'komorebi-forest', () => 0);
+    const meadowNoDrop = performHeroAttack(
+      { ...meadow, enemy: { ...meadow.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.55, 0)
+    );
+    const forestDrop = performHeroAttack(
+      { ...forest, enemy: { ...forest.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.55, 0, 0.6, 0, 0)
+    );
+
+    expect(meadowNoDrop.events.some((event) => event.type === 'loot')).toBe(false);
+    expect(forestDrop.events.some((event) => event.type === 'loot')).toBe(true);
+    expect(forestDrop.state.inventory.at(-1)?.rarity).toBe('rare');
+
+    const meadowDrop = performHeroAttack(
+      { ...meadow, enemy: { ...meadow.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.1, 0, 0.1, 0, 0)
+    ).state.inventory.at(-1)!;
+    const betterForestDrop = performHeroAttack(
+      { ...forest, enemy: { ...forest.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.1, 0, 0.1, 0, 0)
+    ).state.inventory.at(-1)!;
+    expect(betterForestDrop.score).toBeGreaterThan(meadowDrop.score);
+  });
+
   it('enhancement costs rise with each level', () => {
     const item = createInitialState().inventory[0]!;
     const firstCost = getEnhancementCost(item);
@@ -301,6 +468,53 @@ describe('idle RPG loop', () => {
     expect(Number.isFinite(getEnhancementCost(restored))).toBe(true);
     expect(runtime.state.hero.gold).toBe(0);
     expect(runtime.enhance(restored.id)).toBe(false);
+  });
+
+  it('migrates old v1 saves without area progress to the meadow defaults', async () => {
+    const legacySave: Record<string, unknown> = { ...createInitialState() };
+    delete legacySave.selectedArea;
+    delete legacySave.unlockedAreas;
+    delete legacySave.areaProgress;
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(legacySave)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    expect(runtime.state.selectedArea).toBe('sunmeadow');
+    expect(runtime.state.unlockedAreas).toEqual(['sunmeadow']);
+    expect(runtime.state.areaProgress).toEqual({
+      sunmeadow: { regularKills: 0, bossDefeated: false },
+      'komorebi-forest': { regularKills: 0, bossDefeated: false }
+    });
+  });
+
+  it('normalizes saved area progress and restores the selected unlocked destination', async () => {
+    const saved = {
+      ...createInitialState(),
+      selectedArea: 'komorebi-forest',
+      unlockedAreas: ['sunmeadow', 'invalid-area'],
+      areaProgress: {
+        sunmeadow: { regularKills: 999, bossDefeated: true },
+        'komorebi-forest': { regularKills: -12, bossDefeated: false }
+      }
+    };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(saved)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    expect(runtime.state.areaProgress.sunmeadow.regularKills).toBe(AREA_BOSS_KILL_TARGET);
+    expect(runtime.state.areaProgress['komorebi-forest'].regularKills).toBe(0);
+    expect(runtime.state.unlockedAreas).toEqual(['sunmeadow', 'komorebi-forest']);
+    expect(runtime.state.selectedArea).toBe('komorebi-forest');
+
+    runtime.startAdventure('komorebi-forest');
+    expect(runtime.state.mode).toBe('adventure');
+    expect(runtime.state.enemy?.level).toBeGreaterThanOrEqual(4);
   });
 
   it('restores old v1 saves with missing enhancement levels as +0', async () => {

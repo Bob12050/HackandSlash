@@ -6,6 +6,7 @@ import type { CombatEvent, IdleRpgState } from '../game/idleRpg';
 export class StageScene extends Phaser.Scene {
   private guildBackground!: Phaser.GameObjects.Image;
   private meadowBackground!: Phaser.GameObjects.Image;
+  private forestBackground!: Phaser.GameObjects.Image;
   private hero!: Phaser.GameObjects.Image;
   private clerk!: Phaser.GameObjects.Image;
   private enemy!: Phaser.GameObjects.Image;
@@ -16,10 +17,9 @@ export class StageScene extends Phaser.Scene {
   private pendingState: IdleRpgState | undefined;
   private holdingEnemyTransition = false;
   private reduceMotion = false;
-  private enemyBaseScaleX = 1;
-  private enemyBaseScaleY = 1;
   private chestBaseScaleX = 1;
   private chestBaseScaleY = 1;
+  private currentEnemyKind: string | undefined;
 
   constructor() {
     super('StageScene');
@@ -28,22 +28,23 @@ export class StageScene extends Phaser.Scene {
   preload(): void {
     this.load.image('guild-background', 'assets/guild-hall.png');
     this.load.image('meadow-background', 'assets/sunmeadow.png');
+    this.load.image('forest-background', 'assets/komorebi-forest.png');
     this.load.image('adventurer', 'assets/hero.png');
     this.load.image('guild-clerk', 'assets/guild-clerk.png');
     this.load.image('mint-slime', 'assets/mint-slime.png');
+    this.load.image('crown-slime', 'assets/crown-slime.png');
     this.load.image('loot-chest', 'assets/loot-chest.png');
   }
 
   create(): void {
     this.guildBackground = this.add.image(480, 292.5, 'guild-background').setDisplaySize(1040, 585);
     this.meadowBackground = this.add.image(480, 292.5, 'meadow-background').setDisplaySize(1040, 585);
+    this.forestBackground = this.add.image(480, 292.5, 'forest-background').setDisplaySize(1040, 585);
 
     this.hero = this.add.image(255, 480, 'adventurer').setDisplaySize(190, 190).setOrigin(0.5, 0.88);
     this.clerk = this.add.image(710, 480, 'guild-clerk').setDisplaySize(190, 190).setOrigin(0.5, 0.88);
     this.enemy = this.add.image(720, 470, 'mint-slime').setDisplaySize(205, 205).setOrigin(0.5, 0.88);
     this.lootChest = this.add.image(480, 430, 'loot-chest').setDisplaySize(150, 150).setOrigin(0.5).setVisible(false);
-    this.enemyBaseScaleX = this.enemy.scaleX;
-    this.enemyBaseScaleY = this.enemy.scaleY;
     this.chestBaseScaleX = this.lootChest.scaleX;
     this.chestBaseScaleY = this.lootChest.scaleY;
     this.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -74,7 +75,9 @@ export class StageScene extends Phaser.Scene {
       this.pendingState = undefined;
     }
     this.guildBackground.setVisible(isGuild);
-    this.meadowBackground.setVisible(!isGuild);
+    const isForest = !isGuild && state.selectedArea === 'komorebi-forest';
+    this.meadowBackground.setVisible(!isGuild && !isForest);
+    this.forestBackground.setVisible(isForest);
     this.clerk.setVisible(isGuild);
     this.enemy.setVisible(!isGuild).setAlpha(1);
 
@@ -90,14 +93,26 @@ export class StageScene extends Phaser.Scene {
       }
     }
 
-    if (!state.enemy) return;
-    if (state.enemy.kind === 'berry-slime') {
-      this.enemy.setTint(0xff8ca6).setScale(this.enemyBaseScaleX, this.enemyBaseScaleY);
-    } else if (state.enemy.kind === 'puffball') {
-      this.enemy.setTint(0xffd97a).setScale(this.enemyBaseScaleX * 0.88, this.enemyBaseScaleY * 0.88);
-    } else {
-      this.enemy.clearTint().setScale(this.enemyBaseScaleX, this.enemyBaseScaleY);
+    if (!state.enemy) {
+      this.currentEnemyKind = undefined;
+      return;
     }
+    const enemyKindChanged = this.currentEnemyKind !== state.enemy.kind;
+    this.currentEnemyKind = state.enemy.kind;
+    const isBoss = state.enemy.kind === 'crown-slime';
+
+    this.enemy
+      .setTexture(isBoss ? 'crown-slime' : 'mint-slime')
+      .clearTint()
+      .setDisplaySize(isBoss ? 255 : 205, isBoss ? 255 : 205);
+
+    if (state.enemy.kind === 'berry-slime') {
+      this.enemy.setTint(0xff8ca6);
+    } else if (state.enemy.kind === 'puffball') {
+      this.enemy.setTint(0xffd97a).setDisplaySize(180, 180);
+    }
+
+    if (isBoss && enemyKindChanged) this.banner('BOSS!  おおきな王冠スライム');
   }
 
   private animateCombat(events: CombatEvent[]): void {

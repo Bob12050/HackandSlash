@@ -1,7 +1,23 @@
 export type GameMode = 'guild' | 'adventure';
 export type EquipmentSlot = 'weapon' | 'armor' | 'charm';
 export type ItemRarity = 'common' | 'rare' | 'epic';
-export type EnemyKind = 'mint-slime' | 'berry-slime' | 'puffball';
+export type EnemyKind = 'mint-slime' | 'berry-slime' | 'puffball' | 'crown-slime';
+export type AdventureAreaId = 'sunmeadow' | 'komorebi-forest';
+
+export interface AdventureAreaDefinition {
+  id: AdventureAreaId;
+  name: string;
+  description: string;
+  unlockHint: string;
+  recommendedLevel: number;
+  regularKillTarget: number;
+  bossName: string | null;
+}
+
+export interface AdventureAreaProgress {
+  regularKills: number;
+  bossDefeated: boolean;
+}
 
 export interface EquipmentItem {
   id: string;
@@ -63,6 +79,9 @@ export interface IdleRpgState {
   distance: number;
   adventureKills: number;
   encounterCount: number;
+  selectedArea: AdventureAreaId;
+  unlockedAreas: AdventureAreaId[];
+  areaProgress: Record<AdventureAreaId, AdventureAreaProgress>;
   quest: QuestState;
   logs: string[];
 }
@@ -80,6 +99,7 @@ export type CombatEvent =
   | { type: 'loot'; item: EquipmentItem }
   | { type: 'loot-auto-sold'; item: EquipmentItem; gold: number }
   | { type: 'level-up'; level: number }
+  | { type: 'area-unlocked'; areaId: AdventureAreaId; name: string }
   | { type: 'hero-defeated' };
 
 export interface CombatStep {
@@ -89,6 +109,28 @@ export interface CombatStep {
 
 export const INVENTORY_LIMIT = 30;
 export const MAX_ENHANCEMENT_LEVEL = 10;
+export const AREA_BOSS_KILL_TARGET = 10;
+
+export const ADVENTURE_AREAS: readonly AdventureAreaDefinition[] = [
+  {
+    id: 'sunmeadow',
+    name: 'そよかぜ草原',
+    description: '陽だまりの草原。ぷるぷるした魔物が暮らしている。',
+    unlockHint: '最初から冒険できます',
+    recommendedLevel: 1,
+    regularKillTarget: AREA_BOSS_KILL_TARGET,
+    bossName: 'おおきな王冠スライム'
+  },
+  {
+    id: 'komorebi-forest',
+    name: 'こもれび森',
+    description: '木漏れ日がきらめく森。強い魔物と上質な装備が待つ。',
+    unlockHint: 'そよかぜ草原のボスをたおすと解放',
+    recommendedLevel: 4,
+    regularKillTarget: 0,
+    bossName: null
+  }
+] as const;
 
 const RARITY_LABELS: Record<ItemRarity, string> = {
   common: '素朴な',
@@ -143,6 +185,12 @@ export function createInitialState(): IdleRpgState {
     distance: 0,
     adventureKills: 0,
     encounterCount: 0,
+    selectedArea: 'sunmeadow',
+    unlockedAreas: ['sunmeadow'],
+    areaProgress: {
+      sunmeadow: { regularKills: 0, bossDefeated: false },
+      'komorebi-forest': { regularKills: 0, bossDefeated: false }
+    },
     quest: {
       id: 'slime-warmup',
       title: 'ぷるぷる討伐依頼',
@@ -155,6 +203,14 @@ export function createInitialState(): IdleRpgState {
     },
     logs: ['ギルドへようこそ！', 'まずは「冒険に出る」を選ぼう。']
   };
+}
+
+export function getAdventureArea(areaId: AdventureAreaId): AdventureAreaDefinition {
+  return ADVENTURE_AREAS.find((area) => area.id === areaId) ?? ADVENTURE_AREAS[0]!;
+}
+
+export function isAdventureAreaUnlocked(state: IdleRpgState, areaId: AdventureAreaId): boolean {
+  return state.unlockedAreas.includes(areaId);
 }
 
 export function getDerivedStats(state: IdleRpgState): DerivedStats {
@@ -176,18 +232,39 @@ export function getDerivedStats(state: IdleRpgState): DerivedStats {
   );
 }
 
-export function startAdventure(state: IdleRpgState, random: () => number = Math.random): IdleRpgState {
+export function startAdventure(state: IdleRpgState, random?: () => number): IdleRpgState;
+export function startAdventure(
+  state: IdleRpgState,
+  areaId?: AdventureAreaId,
+  random?: () => number
+): IdleRpgState;
+export function startAdventure(
+  state: IdleRpgState,
+  areaOrRandom: AdventureAreaId | (() => number) = state.selectedArea,
+  random: () => number = Math.random
+): IdleRpgState {
   if (state.mode === 'adventure') return state;
+  const areaId = typeof areaOrRandom === 'function' ? state.selectedArea : areaOrRandom;
+  const randomSource = typeof areaOrRandom === 'function' ? areaOrRandom : random;
+  if (!isAdventureAreaId(areaId) || !isAdventureAreaUnlocked(state, areaId)) {
+    const requestedArea = isAdventureAreaId(areaId) ? getAdventureArea(areaId).name : 'そのエリア';
+    return {
+      ...state,
+      logs: appendLog(state.logs, `${requestedArea}はまだ解放されていません。`)
+    };
+  }
   const stats = getDerivedStats(state);
+  const encounterCount = state.encounterCount + 1;
   const next = {
     ...state,
     mode: 'adventure' as const,
     hero: { ...state.hero, hp: stats.maxHp },
     distance: 0,
     adventureKills: 0,
-    encounterCount: 1,
-    enemy: createEnemy(0, 1, random),
-    logs: appendLog(state.logs, 'そよかぜ草原へ出発した！')
+    encounterCount,
+    selectedArea: areaId,
+    enemy: createNextEncounter(state, areaId, 0, encounterCount, randomSource),
+    logs: appendLog(state.logs, `${getAdventureArea(areaId).name}へ出発した！`)
   };
   return next;
 }
@@ -332,19 +409,43 @@ function resolveVictory(
   hitEvent: CombatEvent
 ): CombatStep {
   const enemy = state.enemy!;
+  const areaId = state.selectedArea;
+  const previousProgress = state.areaProgress[areaId];
+  const isBoss = enemy.kind === 'crown-slime';
+  const isFirstBossClear = isBoss && areaId === 'sunmeadow' && !previousProgress.bossDefeated;
+  const nextAreaProgress: AdventureAreaProgress = isBoss
+    ? { ...previousProgress, bossDefeated: true }
+    : {
+        ...previousProgress,
+        regularKills: areaId === 'sunmeadow'
+          ? Math.min(AREA_BOSS_KILL_TARGET, previousProgress.regularKills + 1)
+          : previousProgress.regularKills + 1
+      };
   let next: IdleRpgState = {
     ...state,
     hero: {
       ...state.hero,
-      gold: state.hero.gold + enemy.gold,
+      gold: state.hero.gold + enemy.gold + (isFirstBossClear ? 300 : 0),
       totalKills: state.hero.totalKills + 1
     },
     adventureKills: state.adventureKills + 1,
     distance: state.distance + 55 + Math.floor(clampRoll(random()) * 36),
+    areaProgress: {
+      ...state.areaProgress,
+      [areaId]: nextAreaProgress
+    },
+    unlockedAreas: isFirstBossClear
+      ? uniqueAreas([...state.unlockedAreas, 'komorebi-forest'])
+      : state.unlockedAreas,
     quest: state.quest.claimed || enemy.kind === 'puffball'
       ? state.quest
       : { ...state.quest, progress: Math.min(state.quest.target, state.quest.progress + 1) },
-    logs: appendLog(state.logs, `${enemy.name}を討伐。${enemy.gold}G / EXP ${enemy.xp}`)
+    logs: appendLog(
+      state.logs,
+      isFirstBossClear
+        ? `${enemy.name}を討伐！ 初回報酬300Gを獲得し、こもれび森が解放された！`
+        : `${enemy.name}を討伐。${enemy.gold}G / EXP ${enemy.xp}`
+    )
   };
   const events: CombatEvent[] = [
     hitEvent,
@@ -355,8 +456,33 @@ function resolveVictory(
   next = experience.state;
   if (experience.leveledUp) events.push({ type: 'level-up', level: next.hero.level });
 
-  if (clampRoll(random()) < 0.48) {
-    const item = createEquipment(enemy.level, state.encounterCount, random);
+  if (isFirstBossClear) {
+    const firstClearItem = createSunmeadowFirstClearReward();
+    const equippedIds = new Set(Object.values(next.equipped).filter((id): id is string => id !== null));
+    const replaceableItem = next.inventory
+      .filter((item) => !item.locked && !equippedIds.has(item.id))
+      .sort((a, b) => a.score - b.score)[0];
+    if (next.inventory.length >= INVENTORY_LIMIT && replaceableItem) {
+      const autoSell = Math.max(3, Math.round(replaceableItem.score * 2));
+      events.push({ type: 'loot-auto-sold', item: replaceableItem, gold: autoSell });
+      next = {
+        ...next,
+        hero: { ...next.hero, gold: next.hero.gold + autoSell },
+        inventory: next.inventory.filter((item) => item.id !== replaceableItem.id),
+        logs: appendLog(next.logs, `荷物がいっぱい。${replaceableItem.name}を${autoSell}Gで自動売却。`)
+      };
+    }
+    events.push({ type: 'loot', item: firstClearItem });
+    next = {
+      ...next,
+      inventory: [...next.inventory, firstClearItem],
+      logs: appendLog(next.logs, `${firstClearItem.name}を手に入れた！`)
+    };
+    events.push({ type: 'area-unlocked', areaId: 'komorebi-forest', name: 'こもれび森' });
+  }
+
+  if (clampRoll(random()) < getAdventureAreaDropChance(areaId)) {
+    const item = createEquipment(enemy.level, state.encounterCount, areaId, random);
     if (next.inventory.length < INVENTORY_LIMIT) {
       events.push({ type: 'loot', item });
       next = {
@@ -379,7 +505,7 @@ function resolveVictory(
   next = {
     ...next,
     encounterCount,
-    enemy: createEnemy(next.distance, encounterCount, random)
+    enemy: createNextEncounter(next, areaId, next.distance, encounterCount, random)
   };
   return { state: next, events };
 }
@@ -401,11 +527,59 @@ function applyExperience(state: IdleRpgState, amount: number): { state: IdleRpgS
   return { state: { ...state, hero }, leveledUp };
 }
 
-function createEnemy(distance: number, encounterCount: number, random: () => number): EnemyState {
-  const level = 1 + Math.floor(distance / 240);
+function createNextEncounter(
+  state: IdleRpgState,
+  areaId: AdventureAreaId,
+  distance: number,
+  encounterCount: number,
+  random: () => number
+): EnemyState {
+  const progress = state.areaProgress[areaId];
+  if (areaId === 'sunmeadow' && progress.regularKills >= AREA_BOSS_KILL_TARGET && !progress.bossDefeated) {
+    return createCrownSlime(encounterCount);
+  }
+  return createEnemy(distance, encounterCount, areaId, random);
+}
+
+function createCrownSlime(encounterCount: number): EnemyState {
+  const maxHp = 150;
+  return {
+    id: `boss-${encounterCount}`,
+    kind: 'crown-slime',
+    name: 'おおきな王冠スライム',
+    level: 5,
+    hp: maxHp,
+    maxHp,
+    attack: 14,
+    defense: 5,
+    xp: 72,
+    gold: 96
+  };
+}
+
+function createEnemy(
+  distance: number,
+  encounterCount: number,
+  areaId: AdventureAreaId,
+  random: () => number
+): EnemyState {
+  const areaLevelOffset = areaId === 'komorebi-forest' ? 4 : 1;
+  const level = areaLevelOffset + Math.floor(distance / 240);
   const roll = clampRoll(random());
-  const kind: EnemyKind = roll < 0.62 ? 'mint-slime' : roll < 0.88 ? 'berry-slime' : 'puffball';
-  const name = kind === 'mint-slime' ? 'ミントスライム' : kind === 'berry-slime' ? 'ベリースライム' : 'わたげポポ';
+  const kind: Exclude<EnemyKind, 'crown-slime'> = roll < 0.62
+    ? 'mint-slime'
+    : roll < 0.88 ? 'berry-slime' : 'puffball';
+  const meadowNames: Record<Exclude<EnemyKind, 'crown-slime'>, string> = {
+    'mint-slime': 'ミントスライム',
+    'berry-slime': 'ベリースライム',
+    puffball: 'わたげポポ'
+  };
+  const forestNames: Record<Exclude<EnemyKind, 'crown-slime'>, string> = {
+    'mint-slime': 'こもれびスライム',
+    'berry-slime': '木いちごスライム',
+    puffball: 'きのこポポ'
+  };
+  const name = (areaId === 'komorebi-forest' ? forestNames : meadowNames)[kind];
   const maxHp = 20 + level * 6 + (kind === 'puffball' ? 8 : 0);
   return {
     id: `enemy-${encounterCount}`,
@@ -421,13 +595,21 @@ function createEnemy(distance: number, encounterCount: number, random: () => num
   };
 }
 
-function createEquipment(level: number, encounterCount: number, random: () => number): EquipmentItem {
+function createEquipment(
+  level: number,
+  encounterCount: number,
+  areaId: AdventureAreaId,
+  random: () => number
+): EquipmentItem {
   const slotRoll = clampRoll(random());
   const slot: EquipmentSlot = slotRoll < 0.4 ? 'weapon' : slotRoll < 0.75 ? 'armor' : 'charm';
   const rarityRoll = clampRoll(random());
-  const rarity: ItemRarity = rarityRoll < 0.72 ? 'common' : rarityRoll < 0.95 ? 'rare' : 'epic';
+  const rarity: ItemRarity = areaId === 'komorebi-forest'
+    ? rarityRoll < 0.48 ? 'common' : rarityRoll < 0.89 ? 'rare' : 'epic'
+    : rarityRoll < 0.72 ? 'common' : rarityRoll < 0.95 ? 'rare' : 'epic';
   const base = ITEM_BASES[slot];
-  const multiplier = RARITY_MULTIPLIER[rarity] * (1 + Math.max(0, level - 1) * 0.12);
+  const areaQuality = areaId === 'komorebi-forest' ? 1.15 : 1;
+  const multiplier = RARITY_MULTIPLIER[rarity] * (1 + Math.max(0, level - 1) * 0.12) * areaQuality;
   const item: EquipmentItem = {
     id: `loot-${encounterCount}-${Math.floor(clampRoll(random()) * 1_000_000).toString(36)}`,
     name: `${RARITY_LABELS[rarity]}${base.name}`,
@@ -441,6 +623,26 @@ function createEquipment(level: number, encounterCount: number, random: () => nu
     upgradeLevel: 0
   };
   return { ...item, score: Math.round(inventoryScore(item)) };
+}
+
+function createSunmeadowFirstClearReward(): EquipmentItem {
+  const item: EquipmentItem = {
+    id: 'first-clear-sunmeadow-charm',
+    name: '王冠スライムのお守り',
+    slot: 'charm',
+    rarity: 'epic',
+    attack: 3,
+    defense: 3,
+    maxHp: 14,
+    score: 0,
+    locked: true,
+    upgradeLevel: 0
+  };
+  return { ...item, score: Math.round(inventoryScore(item)) };
+}
+
+function getAdventureAreaDropChance(areaId: AdventureAreaId): number {
+  return areaId === 'komorebi-forest' ? 0.62 : 0.48;
 }
 
 function growEquipment(item: EquipmentItem, upgradeLevel: number): EquipmentItem {
@@ -484,6 +686,14 @@ function rankForLevel(level: number): HeroState['rank'] {
 
 function appendLog(logs: string[], message: string): string[] {
   return [...logs, message].slice(-30);
+}
+
+function uniqueAreas(areaIds: AdventureAreaId[]): AdventureAreaId[] {
+  return [...new Set(areaIds)];
+}
+
+function isAdventureAreaId(value: unknown): value is AdventureAreaId {
+  return value === 'sunmeadow' || value === 'komorebi-forest';
 }
 
 function clampRoll(value: number): number {

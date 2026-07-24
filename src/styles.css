@@ -430,6 +430,7 @@ button:focus-visible {
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
 .toast.rarity-rare { border-color: #75b9dc; background: #e9f7ff; }
 .toast.rarity-epic, .toast.level-up { border-color: #aa8fe3; background: #f3edff; }
+.toast.area-unlocked { border-color: #75b894; background: #ecfaef; }
 .toast.danger { border-color: #e68a8a; background: #fff0eb; }
 
 .app-modal {
@@ -469,6 +470,186 @@ button:focus-visible {
   background: #eee8dc;
   cursor: pointer;
 }
+
+.destination-lead {
+  margin: 13px 3px 11px;
+  color: #746d63;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.destination-list {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.destination-card {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid #b9d9bf;
+  border-radius: 14px;
+  color: var(--ink);
+  background: #f7fff6;
+  box-shadow: 0 4px 10px rgb(64 88 67 / 8%);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.destination-card:active { transform: translateY(2px); }
+
+.destination-card.forest {
+  border-color: #a7cdb3;
+  background: #f2fbf4;
+}
+
+.destination-art {
+  position: relative;
+  display: block;
+  height: 92px;
+  overflow: hidden;
+  background: #c9dfbd;
+}
+
+.destination-art::after {
+  position: absolute;
+  inset: auto 0 0;
+  height: 38px;
+  background: linear-gradient(transparent, rgb(35 66 48 / 31%));
+  content: '';
+}
+
+.destination-art img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center 54%;
+  transition: transform 180ms ease;
+}
+
+.destination-card:not([aria-disabled="true"]):hover .destination-art img { transform: scale(1.025); }
+
+.destination-copy {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px;
+}
+
+.destination-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.destination-heading > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.destination-heading small {
+  color: #6c997f;
+  font-family: Arial, sans-serif;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.destination-heading b {
+  color: #3c5a51;
+  font-size: 17px;
+}
+
+.destination-heading em {
+  padding: 6px 9px;
+  border-radius: 999px;
+  color: white;
+  background: var(--mint);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.destination-heading em i { margin-left: 2px; }
+
+.destination-description {
+  margin-top: 5px;
+  color: #706c64;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.destination-progress-label,
+.destination-reward {
+  margin-top: 8px;
+  color: #647b69;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.destination-progress-label b { color: #3b785f; font-family: Arial, sans-serif; }
+.destination-progress-label .fa-crown { margin-right: 3px; color: #c78b35; }
+
+.destination-progress {
+  height: 7px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #dfe8dc;
+}
+
+.destination-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #66ba87, #e5ac55);
+}
+
+.destination-reward { color: #537d66; }
+.destination-reward i { width: 16px; color: var(--violet); text-align: center; }
+
+.destination-card.is-locked {
+  border-color: #d7d1c5;
+  color: #817b72;
+  background: #efede7;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.destination-card.is-locked .destination-art img {
+  filter: grayscale(.65) brightness(.72);
+  opacity: .78;
+}
+
+.destination-card.is-locked .destination-art::after { background: rgb(57 61 57 / 24%); }
+.destination-card.is-locked .destination-heading small,
+.destination-card.is-locked .destination-heading b { color: #78766f; }
+
+.destination-heading .lock-badge {
+  color: #76716a;
+  background: #dedad1;
+  font-family: Arial, sans-serif;
+  letter-spacing: .05em;
+}
+
+.destination-card.is-locked .destination-reward,
+.destination-card.is-locked .destination-reward i { color: #92785d; }
+
+.destination-note {
+  margin: 12px 3px 0;
+  color: #989187;
+  font-size: 9px;
+  text-align: center;
+}
+
+.destination-note i { margin-right: 3px; color: #6aaa93; }
 
 .equipment-summary,
 .stat-grid {

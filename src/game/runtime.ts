@@ -10,6 +10,8 @@ import {
   startAdventure,
   inventoryScore,
   MAX_ENHANCEMENT_LEVEL,
+  type AdventureAreaId,
+  type AdventureAreaProgress,
   type CombatEvent,
   type EquipmentItem,
   type EquipmentSlot,
@@ -44,10 +46,10 @@ class IdleRpgRuntime {
     return () => this.combatListeners.delete(listener);
   }
 
-  startAdventure(): void {
+  startAdventure(areaId: AdventureAreaId = this.currentState.selectedArea): void {
     this.heroClock = 0;
     this.enemyClock = 0;
-    this.setState(startAdventure(this.currentState));
+    this.setState(startAdventure(this.currentState, areaId));
   }
 
   returnToGuild(): void {
@@ -170,6 +172,11 @@ function normalizeSavedState(parsed: Partial<IdleRpgState>): IdleRpgState | null
   };
   const questSource = parsed.quest;
   const questTarget = safeInteger(questSource.target, fallback.quest.target, 1);
+  const areaProgress = normalizeAreaProgress(parsed.areaProgress, fallback.areaProgress);
+  const unlockedAreas = normalizeUnlockedAreas(parsed.unlockedAreas, areaProgress);
+  const selectedArea = isAdventureAreaId(parsed.selectedArea) && unlockedAreas.includes(parsed.selectedArea)
+    ? parsed.selectedArea
+    : fallback.selectedArea;
 
   return {
     version: 1,
@@ -185,6 +192,9 @@ function normalizeSavedState(parsed: Partial<IdleRpgState>): IdleRpgState | null
     distance: 0,
     adventureKills: 0,
     encounterCount: safeInteger(parsed.encounterCount, 0, 0),
+    selectedArea,
+    unlockedAreas,
+    areaProgress,
     quest: {
       id: safeText(questSource.id, fallback.quest.id),
       title: safeText(questSource.title, fallback.quest.title),
@@ -220,6 +230,34 @@ function normalizeEquipmentItem(value: unknown): EquipmentItem | null {
     ...base,
     score: safeInteger(value.score, Math.max(0, Math.round(inventoryScore(base))), 0)
   };
+}
+
+function normalizeAreaProgress(
+  value: unknown,
+  fallback: Record<AdventureAreaId, AdventureAreaProgress>
+): Record<AdventureAreaId, AdventureAreaProgress> {
+  const source = isRecord(value) ? value : {};
+  const meadowSource = isRecord(source.sunmeadow) ? source.sunmeadow : {};
+  const forestSource = isRecord(source['komorebi-forest']) ? source['komorebi-forest'] : {};
+  return {
+    sunmeadow: {
+      regularKills: Math.min(10, safeInteger(meadowSource.regularKills, fallback.sunmeadow.regularKills, 0)),
+      bossDefeated: meadowSource.bossDefeated === true
+    },
+    'komorebi-forest': {
+      regularKills: safeInteger(forestSource.regularKills, fallback['komorebi-forest'].regularKills, 0),
+      bossDefeated: forestSource.bossDefeated === true
+    }
+  };
+}
+
+function normalizeUnlockedAreas(
+  value: unknown,
+  areaProgress: Record<AdventureAreaId, AdventureAreaProgress>
+): AdventureAreaId[] {
+  const savedAreas = Array.isArray(value) ? value.filter(isAdventureAreaId) : [];
+  if (areaProgress.sunmeadow.bossDefeated) savedAreas.push('komorebi-forest');
+  return [...new Set<AdventureAreaId>(['sunmeadow', ...savedAreas])];
 }
 
 function deduplicateItems(items: EquipmentItem[]): EquipmentItem[] {
@@ -259,6 +297,10 @@ function isSlot(value: unknown): value is EquipmentSlot {
 
 function isRarity(value: unknown): value is EquipmentItem['rarity'] {
   return value === 'common' || value === 'rare' || value === 'epic';
+}
+
+function isAdventureAreaId(value: unknown): value is AdventureAreaId {
+  return value === 'sunmeadow' || value === 'komorebi-forest';
 }
 
 function isRank(value: unknown): value is HeroState['rank'] {
