@@ -1,9 +1,9 @@
 {
-  "name": "riftborne",
-  "version": "0.1.0",
+  "name": "komorebi-guild",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "A new top-down hack-and-slash built with TypeScript and Phaser 4",
+  "description": "A cute portrait auto-battle RPG built with TypeScript and Phaser 4",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.1",
     "phaser": "4.2.1"
   },
   "devDependencies": {

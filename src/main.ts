@@ -1,36 +1,36 @@
 import Phaser from 'phaser';
-import './styles.css';
-import { BootScene } from './scenes/BootScene';
-import { GameScene } from './scenes/GameScene';
-import { HudScene } from './scenes/HudScene';
-import { TitleScene } from './scenes/TitleScene';
+import '@fortawesome/fontawesome-free/css/all.min.css';
 
-const config: Phaser.Types.Core.GameConfig = {
+import './styles.css';
+import { StageScene } from './scenes/StageScene';
+import { mountApp } from './ui/AppView';
+
+const root = document.querySelector<HTMLElement>('#app');
+if (!root) throw new Error('App root is missing');
+
+mountApp(root);
+
+const game = new Phaser.Game({
   type: Phaser.AUTO,
-  parent: 'game-root',
-  width: window.innerWidth,
-  height: window.innerHeight,
-  backgroundColor: '#070a10',
+  parent: 'game-stage',
+  width: 960,
+  height: 585,
+  backgroundColor: '#a9dea0',
+  transparent: false,
   render: {
     antialias: true,
-    roundPixels: false
+    roundPixels: false,
+    pixelArt: false
   },
   scale: {
-    mode: Phaser.Scale.RESIZE,
-    width: '100%',
-    height: '100%'
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: 960,
+    height: 585
   },
-  physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { x: 0, y: 0 },
-      debug: false
-    }
-  },
-  scene: [BootScene, TitleScene, GameScene, HudScene]
-};
+  scene: [StageScene]
+});
 
-const game = new Phaser.Game(config);
-game.canvas.setAttribute('aria-label', 'RIFTBORNE トップダウン・ハクスラ');
+game.canvas.setAttribute('aria-label', 'こもれびギルド物語 自動戦闘画面');
 
 export default game;

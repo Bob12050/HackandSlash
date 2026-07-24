@@ -1,4 +1,4 @@
-name: Build and deploy RIFTBORNE
+name: Build and deploy Komorebi Guild
 
 on:
   push:
