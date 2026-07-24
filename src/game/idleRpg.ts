@@ -32,6 +32,25 @@ export interface EquipmentItem {
   upgradeLevel: number;
 }
 
+export interface EquipmentBaseDefinition {
+  id: string;
+  areaId: AdventureAreaId;
+  slot: EquipmentSlot;
+  name: string;
+  attack: number;
+  defense: number;
+  maxHp: number;
+}
+
+export interface EquipmentCatalogEntry {
+  id: string;
+  name: string;
+  slot: EquipmentSlot;
+  rarity: ItemRarity;
+  source: AdventureAreaId | 'starter' | 'sunmeadow-boss';
+  baseId: string | null;
+}
+
 export interface HeroState {
   level: number;
   xp: number;
@@ -110,6 +129,8 @@ export interface CombatStep {
 export const INVENTORY_LIMIT = 30;
 export const MAX_ENHANCEMENT_LEVEL = 10;
 export const AREA_BOSS_KILL_TARGET = 10;
+export const EQUIPMENT_SLOTS: readonly EquipmentSlot[] = ['weapon', 'armor', 'charm'];
+export const ITEM_RARITIES: readonly ItemRarity[] = ['common', 'rare', 'epic'];
 
 export const ADVENTURE_AREAS: readonly AdventureAreaDefinition[] = [
   {
@@ -132,7 +153,7 @@ export const ADVENTURE_AREAS: readonly AdventureAreaDefinition[] = [
   }
 ] as const;
 
-const RARITY_LABELS: Record<ItemRarity, string> = {
+export const EQUIPMENT_RARITY_LABELS: Readonly<Record<ItemRarity, string>> = {
   common: '素朴な',
   rare: 'きらめく',
   epic: '星降る'
@@ -144,11 +165,105 @@ const RARITY_MULTIPLIER: Record<ItemRarity, number> = {
   epic: 2.55
 };
 
-const ITEM_BASES: Record<EquipmentSlot, { name: string; attack: number; defense: number; maxHp: number }> = {
-  weapon: { name: '旅立ちの剣', attack: 4, defense: 0, maxHp: 0 },
-  armor: { name: '森色のケープ', attack: 0, defense: 3, maxHp: 7 },
-  charm: { name: '小鳥のお守り', attack: 1, defense: 1, maxHp: 4 }
+export const EQUIPMENT_BASES_BY_AREA: Readonly<
+  Record<AdventureAreaId, Readonly<Record<EquipmentSlot, readonly EquipmentBaseDefinition[]>>>
+> = {
+  sunmeadow: {
+    weapon: [
+      { id: 'meadow-dandelion-dagger', areaId: 'sunmeadow', slot: 'weapon', name: 'たんぽぽの短剣', attack: 3, defense: 0, maxHp: 1 },
+      { id: 'meadow-breeze-woodblade', areaId: 'sunmeadow', slot: 'weapon', name: '旅立ちの剣', attack: 4, defense: 0, maxHp: 0 },
+      { id: 'meadow-clover-rod', areaId: 'sunmeadow', slot: 'weapon', name: 'クローバーロッド', attack: 3, defense: 1, maxHp: 2 },
+      { id: 'meadow-sunlit-rapier', areaId: 'sunmeadow', slot: 'weapon', name: 'ひなたのレイピア', attack: 5, defense: 0, maxHp: 0 },
+      { id: 'meadow-picnic-hammer', areaId: 'sunmeadow', slot: 'weapon', name: 'ピクニックハンマー', attack: 4, defense: 1, maxHp: 1 }
+    ],
+    armor: [
+      { id: 'meadow-sprout-cape', areaId: 'sunmeadow', slot: 'armor', name: '森色のケープ', attack: 0, defense: 3, maxHp: 7 },
+      { id: 'meadow-cloud-vest', areaId: 'sunmeadow', slot: 'armor', name: 'ひつじ雲ベスト', attack: 0, defense: 3, maxHp: 5 },
+      { id: 'meadow-sun-apron', areaId: 'sunmeadow', slot: 'armor', name: 'おひさまエプロン', attack: 1, defense: 2, maxHp: 7 },
+      { id: 'meadow-clover-coat', areaId: 'sunmeadow', slot: 'armor', name: 'クローバーコート', attack: 0, defense: 4, maxHp: 6 },
+      { id: 'meadow-breeze-garb', areaId: 'sunmeadow', slot: 'armor', name: 'そよ風の旅装', attack: 0, defense: 3, maxHp: 10 }
+    ],
+    charm: [
+      { id: 'meadow-bird-charm', areaId: 'sunmeadow', slot: 'charm', name: '小鳥のお守り', attack: 1, defense: 1, maxHp: 4 },
+      { id: 'meadow-fourleaf-bookmark', areaId: 'sunmeadow', slot: 'charm', name: '四つ葉のしおり', attack: 1, defense: 2, maxHp: 3 },
+      { id: 'meadow-dandelion-brooch', areaId: 'sunmeadow', slot: 'charm', name: 'たんぽぽブローチ', attack: 2, defense: 1, maxHp: 2 },
+      { id: 'meadow-sky-bell', areaId: 'sunmeadow', slot: 'charm', name: '青空の鈴', attack: 1, defense: 1, maxHp: 7 },
+      { id: 'meadow-honey-charm', areaId: 'sunmeadow', slot: 'charm', name: 'はちみつチャーム', attack: 2, defense: 2, maxHp: 4 }
+    ]
+  },
+  'komorebi-forest': {
+    weapon: [
+      { id: 'forest-acorn-mace', areaId: 'komorebi-forest', slot: 'weapon', name: 'どんぐりメイス', attack: 5, defense: 1, maxHp: 2 },
+      { id: 'forest-sunbeam-blade', areaId: 'komorebi-forest', slot: 'weapon', name: '木漏れ日の剣', attack: 6, defense: 0, maxHp: 1 },
+      { id: 'forest-mushroom-wand', areaId: 'komorebi-forest', slot: 'weapon', name: 'きのこワンド', attack: 5, defense: 1, maxHp: 4 },
+      { id: 'forest-birch-bow', areaId: 'komorebi-forest', slot: 'weapon', name: '白樺の弓', attack: 7, defense: 0, maxHp: 0 },
+      { id: 'forest-moondew-rapier', areaId: 'komorebi-forest', slot: 'weapon', name: '月露のレイピア', attack: 6, defense: 1, maxHp: 2 },
+      { id: 'forest-warden-hammer', areaId: 'komorebi-forest', slot: 'weapon', name: '森番のハンマー', attack: 7, defense: 2, maxHp: 0 }
+    ],
+    armor: [
+      { id: 'forest-moss-cloak', areaId: 'komorebi-forest', slot: 'armor', name: '苔むすマント', attack: 0, defense: 4, maxHp: 10 },
+      { id: 'forest-leaf-tunic', areaId: 'komorebi-forest', slot: 'armor', name: '木の葉のチュニック', attack: 1, defense: 4, maxHp: 9 },
+      { id: 'forest-mushroom-poncho', areaId: 'komorebi-forest', slot: 'armor', name: 'きのこポンチョ', attack: 0, defense: 5, maxHp: 12 },
+      { id: 'forest-birch-mail', areaId: 'komorebi-forest', slot: 'armor', name: '白樺の胸当て', attack: 0, defense: 6, maxHp: 10 },
+      { id: 'forest-moonshadow-robe', areaId: 'komorebi-forest', slot: 'armor', name: '月影のローブ', attack: 2, defense: 4, maxHp: 13 },
+      { id: 'forest-warden-coat', areaId: 'komorebi-forest', slot: 'armor', name: '森番のコート', attack: 0, defense: 6, maxHp: 15 }
+    ],
+    charm: [
+      { id: 'forest-acorn-pendant', areaId: 'komorebi-forest', slot: 'charm', name: 'どんぐりペンダント', attack: 2, defense: 3, maxHp: 7 },
+      { id: 'forest-owl-feather', areaId: 'komorebi-forest', slot: 'charm', name: 'ふくろうの羽根', attack: 3, defense: 2, maxHp: 6 },
+      { id: 'forest-berry-ring', areaId: 'komorebi-forest', slot: 'charm', name: '木いちごの指輪', attack: 3, defense: 3, maxHp: 8 },
+      { id: 'forest-moondew-vial', areaId: 'komorebi-forest', slot: 'charm', name: '月露の小瓶', attack: 2, defense: 3, maxHp: 12 },
+      { id: 'forest-kodama-bell', areaId: 'komorebi-forest', slot: 'charm', name: 'こだまの鈴', attack: 4, defense: 2, maxHp: 9 },
+      { id: 'forest-cat-brooch', areaId: 'komorebi-forest', slot: 'charm', name: '森猫のブローチ', attack: 3, defense: 4, maxHp: 10 }
+    ]
+  }
 };
+
+export function getEquipmentBases(
+  areaId: AdventureAreaId,
+  slot?: EquipmentSlot
+): readonly EquipmentBaseDefinition[] {
+  if (slot) return EQUIPMENT_BASES_BY_AREA[areaId][slot];
+  return EQUIPMENT_SLOTS.flatMap((equipmentSlot) => EQUIPMENT_BASES_BY_AREA[areaId][equipmentSlot]);
+}
+
+export const EQUIPMENT_BASE_CATALOG: readonly EquipmentBaseDefinition[] = ADVENTURE_AREAS.flatMap(
+  (area) => getEquipmentBases(area.id)
+);
+
+const normalEquipmentCatalog: EquipmentCatalogEntry[] = EQUIPMENT_BASE_CATALOG.flatMap((base) =>
+  ITEM_RARITIES.map((rarity) => ({
+    id: `${base.id}-${rarity}`,
+    name: `${EQUIPMENT_RARITY_LABELS[rarity]}${base.name}`,
+    slot: base.slot,
+    rarity,
+    source: base.areaId,
+    baseId: base.id
+  }))
+);
+
+export const EQUIPMENT_CATALOG: readonly EquipmentCatalogEntry[] = [
+  {
+    id: 'starter-weapon',
+    name: 'はじまりの木剣',
+    slot: 'weapon',
+    rarity: 'common',
+    source: 'starter',
+    baseId: null
+  },
+  ...normalEquipmentCatalog,
+  {
+    id: 'first-clear-sunmeadow-charm',
+    name: '王冠スライムのお守り',
+    slot: 'charm',
+    rarity: 'epic',
+    source: 'sunmeadow-boss',
+    baseId: null
+  }
+];
+
+export const TOTAL_EQUIPMENT_COUNT = EQUIPMENT_CATALOG.length;
+export const TOTAL_EQUIPMENT_VARIANTS = TOTAL_EQUIPMENT_COUNT;
 
 export function createInitialState(): IdleRpgState {
   const starterWeapon: EquipmentItem = {
@@ -595,7 +710,7 @@ function createEnemy(
   };
 }
 
-function createEquipment(
+export function createEquipment(
   level: number,
   encounterCount: number,
   areaId: AdventureAreaId,
@@ -607,12 +722,14 @@ function createEquipment(
   const rarity: ItemRarity = areaId === 'komorebi-forest'
     ? rarityRoll < 0.48 ? 'common' : rarityRoll < 0.89 ? 'rare' : 'epic'
     : rarityRoll < 0.72 ? 'common' : rarityRoll < 0.95 ? 'rare' : 'epic';
-  const base = ITEM_BASES[slot];
+  const basePool = EQUIPMENT_BASES_BY_AREA[areaId][slot];
+  const baseIndex = Math.floor(clampRoll(random()) * basePool.length);
+  const base = basePool[baseIndex]!;
   const areaQuality = areaId === 'komorebi-forest' ? 1.15 : 1;
   const multiplier = RARITY_MULTIPLIER[rarity] * (1 + Math.max(0, level - 1) * 0.12) * areaQuality;
   const item: EquipmentItem = {
     id: `loot-${encounterCount}-${Math.floor(clampRoll(random()) * 1_000_000).toString(36)}`,
-    name: `${RARITY_LABELS[rarity]}${base.name}`,
+    name: `${EQUIPMENT_RARITY_LABELS[rarity]}${base.name}`,
     slot,
     rarity,
     attack: Math.round(base.attack * multiplier),

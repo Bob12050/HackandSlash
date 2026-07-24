@@ -1,7 +1,10 @@
 import { runtime } from '../game/runtime';
 import {
+  EQUIPMENT_BASE_CATALOG,
+  EQUIPMENT_CATALOG,
   INVENTORY_LIMIT,
   MAX_ENHANCEMENT_LEVEL,
+  TOTAL_EQUIPMENT_VARIANTS,
   getDerivedStats,
   getEnhancementCost,
   type AdventureAreaId,
@@ -25,6 +28,22 @@ const SLOT_ICONS: Record<EquipmentSlot, string> = {
 const AREA_LABELS: Record<AdventureAreaId, string> = {
   sunmeadow: 'そよかぜ草原',
   'komorebi-forest': 'こもれび森'
+};
+
+const AREA_ORDER: readonly AdventureAreaId[] = ['sunmeadow', 'komorebi-forest'];
+const SLOT_ORDER: readonly EquipmentSlot[] = ['weapon', 'armor', 'charm'];
+
+const AREA_CATALOG_META: Record<AdventureAreaId, { number: string; icon: string; description: string }> = {
+  sunmeadow: {
+    number: 'AREA 01',
+    icon: 'fa-seedling',
+    description: '風や花、スライムをモチーフにした、冒険の始まりを支える装備。'
+  },
+  'komorebi-forest': {
+    number: 'AREA 02',
+    icon: 'fa-tree',
+    description: '木漏れ日と森の生き物の力を宿した、ひとつ上の装備。'
+  }
 };
 
 let toastTimer: number | undefined;
@@ -107,6 +126,9 @@ export function mountApp(root: HTMLElement): void {
     if (modal.open && modal.dataset.view === 'destination' && modalContent.dataset.signature !== destinationSignature(state)) {
       refreshModalPreservingFocus(modalContent, () => renderDestinationModal(state, modalContent));
     }
+    if (modal.open && modal.dataset.view === 'catalog' && modalContent.dataset.signature !== catalogSignature(state)) {
+      refreshModalPreservingFocus(modalContent, () => renderEquipmentCatalogModal(state, modalContent));
+    }
   });
 
   runtime.onCombat((events) => {
@@ -155,6 +177,14 @@ export function mountApp(root: HTMLElement): void {
       if (runtime.enhance(element.dataset.itemId)) showToast('装備を強化しました！', 'level-up');
     }
     if (action === 'claim') runtime.claimQuest();
+    if (action === 'catalog') {
+      openModal('catalog', modal, modalContent, latestState);
+      modalContent.querySelector<HTMLElement>('[data-modal-action="back-menu"]')?.focus();
+    }
+    if (action === 'back-menu') {
+      openModal('menu', modal, modalContent, latestState);
+      modalContent.querySelector<HTMLElement>('[data-modal-action="catalog"]')?.focus();
+    }
     if (action === 'reset') {
       const confirmed = window.confirm('冒険の記録を消して、はじめから遊びますか？');
       if (confirmed) {
@@ -278,6 +308,7 @@ function openModal(
   if (view === 'quest') renderQuestModal(state, content);
   if (view === 'forge') renderForgeModal(state, content);
   if (view === 'destination') renderDestinationModal(state, content);
+  if (view === 'catalog') renderEquipmentCatalogModal(state, content);
   if (view === 'dispatch') renderInfoModal(content, '遠征', 'fa-compass', 'Eランクになると、仲間を送り出して報酬を受け取れるようになります。');
   if (view === 'menu') renderMenuModal(content);
   if (!modal.open) modal.showModal();
@@ -476,14 +507,169 @@ function equipmentAbility(item: EquipmentItem): string {
   ].filter(Boolean).join(' / ');
 }
 
+function renderEquipmentCatalogModal(state: IdleRpgState, content: HTMLElement): void {
+  const normalVariantCount = EQUIPMENT_BASE_CATALOG.length * 3;
+  const fixedVariantCount = Math.max(0, TOTAL_EQUIPMENT_VARIANTS - normalVariantCount);
+  content.innerHTML = `
+    ${modalHeader('装備図鑑', 'fa-book-open', `ALL ${TOTAL_EQUIPMENT_VARIANTS}`)}
+    <button class="catalog-back-button" data-modal-action="back-menu" type="button">
+      <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> メニューに戻る
+    </button>
+    <section class="catalog-intro" aria-labelledby="catalog-intro-title">
+      <div class="catalog-total" aria-label="装備は全${TOTAL_EQUIPMENT_VARIANTS}種類">
+        <span><strong>${TOTAL_EQUIPMENT_VARIANTS}</strong><small>TOTAL ITEMS</small></span>
+        <i class="fa-solid fa-sparkles" aria-hidden="true"></i>
+      </div>
+      <div class="catalog-intro-copy">
+        <h3 id="catalog-intro-title">集めるほど、冒険が楽しくなる！</h3>
+        <p>通常のベース装備 <b>${EQUIPMENT_BASE_CATALOG.length}種</b>は、それぞれ3つのレアリティで登場。${fixedVariantCount > 0 ? `さらに冒険・ボス報酬の固定装備${fixedVariantCount}種を加えて、` : ''}全${TOTAL_EQUIPMENT_VARIANTS}種です。</p>
+      </div>
+      <div class="catalog-rarity-key" aria-label="3つのレアリティ">
+        <span class="common"><i aria-hidden="true"></i>素朴な</span>
+        <span class="rare"><i aria-hidden="true"></i>きらめく</span>
+        <span class="epic"><i aria-hidden="true"></i>星降る</span>
+      </div>
+    </section>
+    <div class="equipment-catalog" aria-label="エリア別装備一覧">
+      ${AREA_ORDER.map((areaId) => equipmentCatalogArea(areaId, state)).join('')}
+      ${fixedEquipmentCatalogSection(state)}
+    </div>
+    <p class="catalog-footnote"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> 表示中の数値はベース装備の傾向です。レアリティによって能力が大きくなります。</p>
+  `;
+  content.dataset.signature = catalogSignature(state);
+}
+
+function equipmentCatalogArea(areaId: AdventureAreaId, state: IdleRpgState): string {
+  const areaItems = EQUIPMENT_BASE_CATALOG.filter((item) => item.areaId === areaId);
+  const meta = AREA_CATALOG_META[areaId];
+  const unlocked = state.unlockedAreas.includes(areaId);
+  const areaVariantCount = areaItems.length * 3;
+  return `
+    <section class="catalog-area ${unlocked ? '' : 'is-locked'}" aria-labelledby="catalog-area-${areaId}">
+      <header class="catalog-area-header">
+        <span class="catalog-area-icon"><i class="fa-solid ${unlocked ? meta.icon : 'fa-lock'}" aria-hidden="true"></i></span>
+        <span>
+          <small>${meta.number}</small>
+          <h3 id="catalog-area-${areaId}">${AREA_LABELS[areaId]}</h3>
+          <p>${unlocked ? meta.description : '王冠スライムを倒すと、装備の名前が明らかになります。'}</p>
+        </span>
+        <em>${areaItems.length} BASE<br><b>${areaVariantCount} ITEMS</b></em>
+      </header>
+      ${unlocked
+        ? SLOT_ORDER.map((slot) => equipmentCatalogSlot(areaId, slot)).join('')
+        : equipmentCatalogLockedSlots(areaId)}
+    </section>
+  `;
+}
+
+function equipmentCatalogSlot(areaId: AdventureAreaId, slot: EquipmentSlot): string {
+  const items = EQUIPMENT_BASE_CATALOG.filter((item) => item.areaId === areaId && item.slot === slot);
+  if (items.length === 0) return '';
+  const headingId = `catalog-slot-${areaId}-${slot}`;
+  return `
+    <section class="catalog-slot-group" aria-labelledby="${headingId}">
+      <h4 id="${headingId}">
+        <span><i class="fa-solid ${SLOT_ICONS[slot]}" aria-hidden="true"></i>${SLOT_LABELS[slot]}</span>
+        <small>${items.length}種 × 3 RARITIES</small>
+      </h4>
+      <ul class="catalog-item-list">
+        ${items.map((item) => equipmentCatalogRow(item)).join('')}
+      </ul>
+    </section>
+  `;
+}
+
+function equipmentCatalogLockedSlots(areaId: AdventureAreaId): string {
+  return `
+    <div class="catalog-locked-preview" role="group" aria-label="未解放の装備内訳">
+      ${SLOT_ORDER.map((slot) => {
+        const count = EQUIPMENT_BASE_CATALOG.filter((item) => item.areaId === areaId && item.slot === slot).length;
+        return `
+          <div>
+            <span><i class="fa-solid ${SLOT_ICONS[slot]}" aria-hidden="true"></i>${SLOT_LABELS[slot]}</span>
+            <b>??? <small>× ${count}</small></b>
+          </div>
+        `;
+      }).join('')}
+      <p><i class="fa-solid fa-crown" aria-hidden="true"></i> そよかぜ草原のボス討伐で解放</p>
+    </div>
+  `;
+}
+
+function fixedEquipmentCatalogSection(state: IdleRpgState): string {
+  const fixedItems = EQUIPMENT_CATALOG.filter((item) => item.baseId === null);
+  const bossRewardUnlocked = state.areaProgress.sunmeadow.bossDefeated
+    || state.unlockedAreas.includes('komorebi-forest');
+  return `
+    <section class="catalog-special" aria-labelledby="catalog-special-title">
+      <header class="catalog-special-header">
+        <span class="catalog-area-icon"><i class="fa-solid fa-star" aria-hidden="true"></i></span>
+        <span>
+          <small>SPECIAL / FIXED</small>
+          <h3 id="catalog-special-title">特別な装備</h3>
+          <p>冒険の始まりや、ボス討伐で一度だけ手に入る固定装備。</p>
+        </span>
+        <em>${fixedItems.length} ITEMS</em>
+      </header>
+      <ul class="catalog-special-list">
+        ${fixedItems.map((item) => {
+          const starter = item.source === 'starter';
+          const visible = starter || bossRewardUnlocked;
+          return `
+            <li class="${visible ? '' : 'is-secret'}">
+              <span class="catalog-item-icon"><i class="fa-solid ${visible ? SLOT_ICONS[item.slot] : 'fa-lock'}" aria-hidden="true"></i></span>
+              <span class="catalog-item-name">
+                <b>${visible ? escapeHtml(item.name) : '???'}</b>
+                <small>${starter ? 'はじめから所持' : visible ? '草原ボス初回討伐報酬' : '王冠スライム討伐で解放'}</small>
+              </span>
+              <span class="catalog-special-badge ${item.rarity}">${visible ? '固定装備' : 'LOCKED'}</span>
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    </section>
+  `;
+}
+
+function equipmentCatalogRow(item: (typeof EQUIPMENT_BASE_CATALOG)[number]): string {
+  const stats = [
+    item.attack > 0 ? `<span>ATK <b>+${item.attack}</b></span>` : '',
+    item.defense > 0 ? `<span>DEF <b>+${item.defense}</b></span>` : '',
+    item.maxHp > 0 ? `<span>HP <b>+${item.maxHp}</b></span>` : ''
+  ].filter(Boolean).join('');
+  return `
+    <li>
+      <span class="catalog-item-icon"><i class="fa-solid ${SLOT_ICONS[item.slot]}" aria-hidden="true"></i></span>
+      <span class="catalog-item-name"><b>${escapeHtml(item.name)}</b><small>${catalogStatTendency(item)}</small></span>
+      <span class="catalog-item-stats">${stats}</span>
+    </li>
+  `;
+}
+
+function catalogStatTendency(item: (typeof EQUIPMENT_BASE_CATALOG)[number]): string {
+  const stats = [
+    { label: '攻撃型', value: item.attack * 2 },
+    { label: '防御型', value: item.defense * 1.7 },
+    { label: '体力型', value: item.maxHp * 0.32 }
+  ];
+  const highest = Math.max(...stats.map((stat) => stat.value));
+  const strongest = stats.filter((stat) => stat.value === highest && stat.value > 0);
+  return strongest.length === 1 ? strongest[0]!.label : 'バランス型';
+}
+
 function renderInfoModal(content: HTMLElement, title: string, icon: string, copy: string): void {
   content.innerHTML = `${modalHeader(title, icon, 'COMING SOON')}<div class="empty-state"><i class="fa-solid ${icon}"></i><p>${copy}</p></div>`;
 }
 
 function renderMenuModal(content: HTMLElement): void {
   content.innerHTML = `
-    ${modalHeader('メニュー', 'fa-table-cells-large', '設定')}
+    ${modalHeader('メニュー', 'fa-table-cells-large', '図鑑・設定')}
     <div class="menu-list">
+      <button class="menu-entry-button catalog-entry" data-modal-action="catalog" type="button">
+        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+        <span><b>装備図鑑</b><small>エリア別に装備を見る</small></span>
+        <em>${TOTAL_EQUIPMENT_VARIANTS}種 <i class="fa-solid fa-chevron-right" aria-hidden="true"></i></em>
+      </button>
       <div><i class="fa-solid fa-cloud-arrow-up"></i><span><b>オートセーブ</b><small>この端末に自動で保存</small></span><em>ON</em></div>
       <div><i class="fa-solid fa-volume-high"></i><span><b>サウンド</b><small>演出音は今後追加予定</small></span><em>—</em></div>
     </div>
@@ -537,6 +723,10 @@ function destinationSignature(state: IdleRpgState): string {
     forest.regularKills,
     forest.bossDefeated
   ].join(':');
+}
+
+function catalogSignature(state: IdleRpgState): string {
+  return state.unlockedAreas.join(',');
 }
 
 function refreshModalPreservingFocus(content: HTMLElement, render: () => void): void {

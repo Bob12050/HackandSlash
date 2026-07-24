@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   claimQuest,
+  createEquipment,
   createInitialState,
   enhanceItem,
   equipItem,
@@ -13,8 +14,16 @@ import {
   sellItem,
   startAdventure,
   AREA_BOSS_KILL_TARGET,
+  EQUIPMENT_BASE_CATALOG,
+  EQUIPMENT_BASES_BY_AREA,
+  EQUIPMENT_CATALOG,
+  EQUIPMENT_RARITY_LABELS,
+  EQUIPMENT_SLOTS,
   INVENTORY_LIMIT,
+  ITEM_RARITIES,
   MAX_ENHANCEMENT_LEVEL,
+  TOTAL_EQUIPMENT_VARIANTS,
+  type AdventureAreaId,
   type EquipmentItem
 } from '../src/game/idleRpg';
 
@@ -28,6 +37,72 @@ afterEach(() => {
 });
 
 describe('idle RPG loop', () => {
+  it('publishes an exact 101-item equipment catalog with unique ids and names', () => {
+    expect(TOTAL_EQUIPMENT_VARIANTS).toBe(101);
+    expect(EQUIPMENT_CATALOG).toHaveLength(101);
+    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.id)).size).toBe(101);
+    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.name)).size).toBe(101);
+    expect(EQUIPMENT_CATALOG.filter((item) => item.source === 'starter')).toHaveLength(1);
+    expect(EQUIPMENT_CATALOG.filter((item) => item.source === 'sunmeadow-boss')).toHaveLength(1);
+    expect(EQUIPMENT_CATALOG.filter((item) => item.baseId !== null)).toHaveLength(99);
+  });
+
+  it('groups 15 meadow and 18 forest equipment bases evenly across all three slots', () => {
+    expect(EQUIPMENT_BASE_CATALOG).toHaveLength(33);
+    for (const slot of EQUIPMENT_SLOTS) {
+      expect(EQUIPMENT_BASES_BY_AREA.sunmeadow[slot]).toHaveLength(5);
+      expect(EQUIPMENT_BASES_BY_AREA['komorebi-forest'][slot]).toHaveLength(6);
+      expect(EQUIPMENT_BASES_BY_AREA.sunmeadow[slot].every((base) => base.slot === slot)).toBe(true);
+      expect(EQUIPMENT_BASES_BY_AREA['komorebi-forest'][slot].every((base) => base.slot === slot)).toBe(true);
+    }
+    expect(new Set(EQUIPMENT_BASE_CATALOG.map((base) => base.id)).size).toBe(33);
+    expect(new Set(EQUIPMENT_BASE_CATALOG.map((base) => base.name)).size).toBe(33);
+  });
+
+  it('can actually generate every area base in every rarity with sane stats', () => {
+    const slotRolls: Record<(typeof EQUIPMENT_SLOTS)[number], number> = {
+      weapon: 0.1,
+      armor: 0.5,
+      charm: 0.9
+    };
+    const rarityRolls: Record<(typeof ITEM_RARITIES)[number], number> = {
+      common: 0.1,
+      rare: 0.8,
+      epic: 0.99
+    };
+    const generatedNames = new Set<string>();
+
+    for (const areaId of ['sunmeadow', 'komorebi-forest'] satisfies AdventureAreaId[]) {
+      for (const slot of EQUIPMENT_SLOTS) {
+        const pool = EQUIPMENT_BASES_BY_AREA[areaId][slot];
+        pool.forEach((base, index) => {
+          for (const rarity of ITEM_RARITIES) {
+            const item = createEquipment(
+              areaId === 'komorebi-forest' ? 4 : 1,
+              generatedNames.size + 1,
+              areaId,
+              rolls(slotRolls[slot], rarityRolls[rarity], (index + 0.1) / pool.length, 0.25)
+            );
+            expect(item.name).toBe(`${EQUIPMENT_RARITY_LABELS[rarity]}${base.name}`);
+            expect(item.slot).toBe(slot);
+            expect(item.rarity).toBe(rarity);
+            expect(item.attack).toBeGreaterThanOrEqual(0);
+            expect(item.defense).toBeGreaterThanOrEqual(0);
+            expect(item.maxHp).toBeGreaterThanOrEqual(0);
+            expect(item.attack + item.defense + item.maxHp).toBeGreaterThan(0);
+            expect(Number.isFinite(item.score)).toBe(true);
+            expect(item.score).toBeGreaterThan(0);
+            generatedNames.add(item.name);
+          }
+        });
+      }
+    }
+
+    expect(generatedNames).toEqual(new Set(
+      EQUIPMENT_CATALOG.filter((item) => item.baseId !== null).map((item) => item.name)
+    ));
+  });
+
   it('starts at the guild with beginner equipment', () => {
     const state = createInitialState();
     expect(state.mode).toBe('guild');
