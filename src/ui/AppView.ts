@@ -8,10 +8,13 @@ import {
   MAX_ENHANCEMENT_LEVEL,
   RELIC_DROP_CHANCES_PER_DEFEAT,
   TOTAL_EQUIPMENT_VARIANTS,
+  compareEquipmentByRecommendation,
   getDerivedStats,
   getEnhancementCost,
+  getRecommendedEquipment,
   type AdventureAreaId,
   type EquipmentItem,
+  type EquipmentRecommendationMode,
   type EquipmentSlot,
   type IdleRpgState
 } from '../game/idleRpg';
@@ -49,7 +52,20 @@ const AREA_CATALOG_META: Record<AdventureAreaId, { number: string; icon: string;
   }
 };
 
+const RECOMMENDATION_MODE_OPTIONS: ReadonlyArray<{
+  mode: EquipmentRecommendationMode;
+  label: string;
+  icon: string;
+}> = [
+  { mode: 'overall', label: '総合力', icon: 'fa-star' },
+  { mode: 'attack', label: '攻撃', icon: 'fa-wand-sparkles' },
+  { mode: 'defense', label: '防御', icon: 'fa-shield-halved' },
+  { mode: 'maxHp', label: 'HP', icon: 'fa-heart' }
+];
+
 let toastTimer: number | undefined;
+let relicCutInTimer: number | undefined;
+let equipmentRecommendationMode: EquipmentRecommendationMode = 'overall';
 
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = `
@@ -106,6 +122,20 @@ export function mountApp(root: HTMLElement): void {
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="relic-cut-in" class="relic-cut-in" popover="manual">
+      <div class="relic-cut-in-glow" aria-hidden="true"></div>
+      <i class="fa-solid fa-star relic-cut-in-star star-one" aria-hidden="true"></i>
+      <i class="fa-solid fa-sparkles relic-cut-in-star star-two" aria-hidden="true"></i>
+      <i class="fa-solid fa-star relic-cut-in-star star-three" aria-hidden="true"></i>
+      <div class="relic-cut-in-panel">
+        <span class="relic-cut-in-kicker"><i class="fa-solid fa-star" aria-hidden="true"></i> RELIC DISCOVERED <i class="fa-solid fa-star" aria-hidden="true"></i></span>
+        <span class="relic-cut-in-gem" aria-hidden="true"><i class="fa-solid fa-gem"></i></span>
+        <p>秘宝発見！</p>
+        <strong id="relic-cut-in-item"></strong>
+        <small>奇跡の装備を手に入れた</small>
+      </div>
+      <span id="relic-cut-in-announcer" class="sr-only" role="status" aria-live="assertive" aria-atomic="true"></span>
+    </div>
     <dialog id="app-modal" class="app-modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
   `;
 
@@ -145,6 +175,12 @@ export function mountApp(root: HTMLElement): void {
     else if (autoSold?.type === 'loot-auto-sold') showToast(`荷物がいっぱい。${autoSold.gold}Gで自動売却`, 'level-up');
     else if (levelUp?.type === 'level-up') showToast(`LEVEL UP！ Lv.${levelUp.level}になった`, 'level-up');
     else if (defeat) showToast('ギルドに運ばれました…', 'danger');
+    const relicItem = loot?.type === 'loot' && loot.item.rarity === 'relic'
+      ? loot.item
+      : autoSold?.type === 'loot-auto-sold' && autoSold.item.rarity === 'relic'
+        ? autoSold.item
+        : null;
+    if (relicItem) showRelicCutIn(relicItem.name);
   });
 
   root.addEventListener('click', (event) => {
@@ -178,6 +214,16 @@ export function mountApp(root: HTMLElement): void {
     if (action === 'sell' && element.dataset.itemId) runtime.sell(element.dataset.itemId);
     if (action === 'enhance' && element.dataset.itemId) {
       if (runtime.enhance(element.dataset.itemId)) showToast('装備を強化しました！', 'level-up');
+    }
+    if (action === 'equipment-mode' && element.dataset.recommendationMode) {
+      const nextMode = RECOMMENDATION_MODE_OPTIONS.find((option) => option.mode === element.dataset.recommendationMode)?.mode;
+      if (nextMode) {
+        equipmentRecommendationMode = nextMode;
+        refreshModalPreservingFocus(modalContent, () => renderEquipmentModal(latestState, modalContent));
+      }
+    }
+    if (action === 'equip-recommended') {
+      if (runtime.equipRecommended(equipmentRecommendationMode)) showToast('おすすめ装備に変更しました！', 'level-up');
     }
     if (action === 'claim') runtime.claimQuest();
     if (action === 'catalog') {
@@ -368,20 +414,64 @@ function renderDestinationModal(state: IdleRpgState, content: HTMLElement): void
 
 function renderEquipmentModal(state: IdleRpgState, content: HTMLElement): void {
   const stats = getDerivedStats(state);
-  const items = [...state.inventory].sort((a, b) => b.score - a.score);
+  const items = [...state.inventory].sort((a, b) => (
+    compareEquipmentByRecommendation(a, b, equipmentRecommendationMode)
+  ));
+  const recommendedBySlot = getRecommendedEquipment(state, equipmentRecommendationMode);
+  const recommendedIds = new Set<string>();
+  let recommendationCount = 0;
+  let hasRecommendationChange = false;
+  for (const slot of SLOT_ORDER) {
+    const recommendation = recommendedBySlot[slot];
+    if (!recommendation) continue;
+    recommendedIds.add(recommendation.id);
+    recommendationCount += 1;
+    if (state.equipped[slot] !== recommendation.id) hasRecommendationChange = true;
+  }
+  const activeMode = RECOMMENDATION_MODE_OPTIONS.find((option) => option.mode === equipmentRecommendationMode)!;
   content.innerHTML = `
     ${modalHeader('装備', 'fa-shield-halved', `${state.inventory.length} / ${INVENTORY_LIMIT}`)}
     <div class="equipment-summary">
       <span>HP <b>${stats.maxHp}</b></span><span>ATK <b>${stats.attack}</b></span><span>DEF <b>${stats.defense}</b></span>
     </div>
+    <section class="equipment-recommender" aria-labelledby="recommendation-title">
+      <div class="recommendation-heading">
+        <span><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i><b id="recommendation-title">おすすめ選び</b></span>
+        <small>基準に合わせて並べ替え</small>
+      </div>
+      <div class="equipment-mode-chips" role="group" aria-label="おすすめ装備の基準">
+        ${RECOMMENDATION_MODE_OPTIONS.map((option) => `
+          <button
+            data-modal-action="equipment-mode"
+            data-recommendation-mode="${option.mode}"
+            type="button"
+            aria-pressed="${option.mode === equipmentRecommendationMode}"
+          >
+            <i class="fa-solid ${option.icon}" aria-hidden="true"></i>${option.label}
+          </button>
+        `).join('')}
+      </div>
+      <button
+        class="equip-recommended-button"
+        data-modal-action="equip-recommended"
+        type="button"
+        aria-disabled="${!hasRecommendationChange}"
+      >
+        <i class="fa-solid ${hasRecommendationChange ? 'fa-sparkles' : 'fa-circle-check'}" aria-hidden="true"></i>
+        <span>
+          <b>${hasRecommendationChange ? 'おすすめを一括装備' : 'おすすめ装備中'}</b>
+          <small>${activeMode.label}基準・${recommendationCount}部位</small>
+        </span>
+      </button>
+    </section>
     <div class="equipment-list">
-      ${items.map((item) => equipmentRow(item, state)).join('')}
+      ${items.map((item) => equipmentRow(item, state, recommendedIds.has(item.id))).join('')}
     </div>
   `;
   content.dataset.signature = equipmentSignature(state);
 }
 
-function equipmentRow(item: EquipmentItem, state: IdleRpgState): string {
+function equipmentRow(item: EquipmentItem, state: IdleRpgState, recommended: boolean): string {
   const equipped = state.equipped[item.slot] === item.id;
   const statParts = [
     item.attack > 0 ? `ATK +${item.attack}` : '',
@@ -389,9 +479,13 @@ function equipmentRow(item: EquipmentItem, state: IdleRpgState): string {
     item.maxHp > 0 ? `HP +${item.maxHp}` : ''
   ].filter(Boolean).join(' / ');
   return `
-    <article class="equipment-row rarity-${item.rarity}">
+    <article class="equipment-row rarity-${item.rarity} ${recommended ? 'is-recommended' : ''}">
       <div class="item-icon"><i class="fa-solid ${SLOT_ICONS[item.slot]}" aria-hidden="true"></i></div>
-      <div class="item-copy"><small>${SLOT_LABELS[item.slot]}・Score ${item.score}</small><b>${escapeHtml(item.name)}${item.upgradeLevel > 0 ? ` <mark>+${item.upgradeLevel}</mark>` : ''}</b><span>${statParts}</span></div>
+      <div class="item-copy">
+        <div class="item-meta"><small>${SLOT_LABELS[item.slot]}・Score ${item.score}</small>${recommended ? '<em><i class="fa-solid fa-star" aria-hidden="true"></i> おすすめ</em>' : ''}</div>
+        <b>${escapeHtml(item.name)}${item.upgradeLevel > 0 ? ` <mark>+${item.upgradeLevel}</mark>` : ''}</b>
+        <span>${statParts}</span>
+      </div>
       <div class="item-actions">
         <button data-modal-action="equip" data-item-id="${item.id}" ${equipped ? 'disabled' : ''}>${equipped ? '装備中' : '装備'}</button>
         ${!equipped && !item.locked ? `<button class="sell" data-modal-action="sell" data-item-id="${item.id}">売却</button>` : ''}
@@ -686,6 +780,33 @@ function modalHeader(title: string, icon: string, detail: string): string {
   `;
 }
 
+function showRelicCutIn(itemName: string): void {
+  const cutIn = required<HTMLElement>('relic-cut-in');
+  const item = required<HTMLElement>('relic-cut-in-item');
+  const announcer = required<HTMLElement>('relic-cut-in-announcer');
+  if (relicCutInTimer !== undefined) window.clearTimeout(relicCutInTimer);
+
+  const supportsPopover = typeof cutIn.showPopover === 'function';
+  if (supportsPopover && cutIn.matches(':popover-open')) cutIn.hidePopover();
+  cutIn.classList.remove('is-showing', 'is-fallback-open');
+  item.textContent = itemName;
+  announcer.textContent = '';
+
+  if (supportsPopover) cutIn.showPopover();
+  else cutIn.classList.add('is-fallback-open');
+  void cutIn.offsetWidth;
+  cutIn.classList.add('is-showing');
+  window.requestAnimationFrame(() => {
+    announcer.textContent = `秘宝発見。${itemName}を手に入れました。`;
+  });
+
+  relicCutInTimer = window.setTimeout(() => {
+    cutIn.classList.remove('is-showing', 'is-fallback-open');
+    if (supportsPopover && cutIn.matches(':popover-open')) cutIn.hidePopover();
+    relicCutInTimer = undefined;
+  }, 3400);
+}
+
 function showToast(message: string, className: string): void {
   const toast = required<HTMLElement>('toast');
   if (toastTimer !== undefined) window.clearTimeout(toastTimer);
@@ -700,7 +821,8 @@ function showToast(message: string, className: string): void {
 function equipmentSignature(state: IdleRpgState): string {
   return JSON.stringify({
     inventory: state.inventory.map((item) => [item.id, item.score, item.upgradeLevel]),
-    equipped: state.equipped
+    equipped: state.equipped,
+    recommendationMode: equipmentRecommendationMode
   });
 }
 
@@ -739,12 +861,14 @@ function refreshModalPreservingFocus(content: HTMLElement, render: () => void): 
   const modalAction = activeElement?.dataset.modalAction;
   const itemId = activeElement?.dataset.itemId;
   const areaId = activeElement?.dataset.areaId;
+  const recommendationMode = activeElement?.dataset.recommendationMode;
   render();
   if (!modalAction) return;
   const nextTarget = [...content.querySelectorAll<HTMLElement>('[data-modal-action]')].find((element) => (
     element.dataset.modalAction === modalAction
     && element.dataset.itemId === itemId
     && element.dataset.areaId === areaId
+    && element.dataset.recommendationMode === recommendationMode
   ));
   const fallback = content.querySelector<HTMLElement>('[data-modal-action="close"]');
   (nextTarget ?? fallback)?.focus({ preventScroll: true });

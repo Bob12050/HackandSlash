@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   claimQuest,
+  compareEquipmentByRecommendation,
   createEquipment,
   createInitialState,
   enhanceItem,
   equipItem,
+  equipRecommended,
   getEnhancementCost,
   getDerivedStats,
+  getRecommendedEquipment,
   performEnemyAttack,
   performHeroAttack,
   returnToGuild,
@@ -35,6 +38,24 @@ const rolls = (...values: number[]): (() => number) => {
   let index = 0;
   return () => values[index++] ?? values.at(-1) ?? 0;
 };
+
+const equipment = (
+  id: string,
+  slot: EquipmentItem['slot'],
+  overrides: Partial<EquipmentItem> = {}
+): EquipmentItem => ({
+  id,
+  name: id,
+  slot,
+  rarity: 'common',
+  attack: 0,
+  defense: 0,
+  maxHp: 0,
+  score: 1,
+  locked: false,
+  upgradeLevel: 0,
+  ...overrides
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -258,6 +279,65 @@ describe('idle RPG loop', () => {
     expect(result.events.some((event) => event.type === 'loot-auto-sold')).toBe(true);
   });
 
+  it('replaces the lowest-score unlocked unequipped item to protect a relic drop', () => {
+    const base = createInitialState();
+    const replaceableItems = Array.from({ length: 29 }, (_, index) =>
+      equipment(`replaceable-${index}`, 'armor', {
+        defense: index + 1,
+        score: index + 1
+      })
+    );
+    const relicLowerBound = EQUIPMENT_RARITY_THRESHOLDS.sunmeadow.at(-2)!.upperBound;
+    const adventure = startAdventure({
+      ...base,
+      inventory: [...base.inventory, ...replaceableItems]
+    }, () => 0);
+    const result = performHeroAttack(
+      { ...adventure, enemy: { ...adventure.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.1, 0, (relicLowerBound + 1) / 2, 0, 0, 0)
+    );
+
+    expect(result.state.inventory).toHaveLength(INVENTORY_LIMIT);
+    expect(result.state.inventory.some((item) => item.id === 'replaceable-0')).toBe(false);
+    expect(result.state.inventory.some((item) => item.rarity === 'relic')).toBe(true);
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'loot-auto-sold', item: expect.objectContaining({ id: 'replaceable-0' })
+    }));
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'loot', item: expect.objectContaining({ rarity: 'relic' })
+    }));
+    expect(result.state.logs.some((log) => log.startsWith('【秘宝発見】'))).toBe(true);
+  });
+
+  it('keeps a relic beyond the inventory limit when every existing item is protected', () => {
+    const base = createInitialState();
+    const protectedItems = Array.from({ length: INVENTORY_LIMIT }, (_, index) =>
+      equipment(`protected-${index}`, 'weapon', {
+        attack: 3,
+        score: 3,
+        locked: true
+      })
+    );
+    const relicLowerBound = EQUIPMENT_RARITY_THRESHOLDS.sunmeadow.at(-2)!.upperBound;
+    const adventure = startAdventure({
+      ...base,
+      inventory: protectedItems,
+      equipped: { weapon: 'protected-0', armor: null, charm: null }
+    }, () => 0);
+    const result = performHeroAttack(
+      { ...adventure, enemy: { ...adventure.enemy!, hp: 1 } },
+      rolls(0.9, 0.5, 0, 0.1, 0, (relicLowerBound + 1) / 2, 0, 0, 0)
+    );
+
+    expect(result.state.inventory).toHaveLength(INVENTORY_LIMIT + 1);
+    expect(result.state.inventory.at(-1)?.rarity).toBe('relic');
+    expect(result.events.some((event) => event.type === 'loot-auto-sold')).toBe(false);
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'loot', item: expect.objectContaining({ rarity: 'relic' })
+    }));
+    expect(result.state.logs.at(-1)).toContain('所持上限を超えて保管');
+  });
+
   it('counts only slime enemies toward the slime quest', () => {
     const adventure = startAdventure(createInitialState(), () => 0.99);
     expect(adventure.enemy?.kind).toBe('puffball');
@@ -277,6 +357,73 @@ describe('idle RPG loop', () => {
     const state = equipItem({ ...base, inventory: [...base.inventory, armor] }, armor.id);
     expect(state.equipped.armor).toBe(armor.id);
     expect(getDerivedStats(state).defense).toBe(10);
+  });
+
+  it('recommends the best equipment for overall, attack, defense, and max hp modes', () => {
+    const base = createInitialState();
+    const items: EquipmentItem[] = [
+      equipment('weapon-overall', 'weapon', { attack: 8, defense: 1, score: 30 }),
+      equipment('weapon-attack', 'weapon', { attack: 12, score: 25, rarity: 'epic' }),
+      equipment('armor-defense', 'armor', { defense: 14, maxHp: 5, score: 25 }),
+      equipment('armor-hp', 'armor', { defense: 6, maxHp: 30, score: 24 }),
+      equipment('charm-overall', 'charm', { attack: 4, defense: 4, maxHp: 8, score: 28 }),
+      equipment('charm-hp', 'charm', { attack: 1, defense: 1, maxHp: 25, score: 20 })
+    ];
+    const state = { ...base, inventory: [...base.inventory, ...items] };
+
+    expect(getRecommendedEquipment(state, 'overall')).toMatchObject({
+      weapon: { id: 'weapon-overall' },
+      armor: { id: 'armor-defense' },
+      charm: { id: 'charm-overall' }
+    });
+    expect(getRecommendedEquipment(state, 'attack').weapon?.id).toBe('weapon-attack');
+    expect(getRecommendedEquipment(state, 'defense').armor?.id).toBe('armor-defense');
+    expect(getRecommendedEquipment(state, 'maxHp')).toMatchObject({
+      armor: { id: 'armor-hp' },
+      charm: { id: 'charm-hp' }
+    });
+  });
+
+  it('orders recommendations by primary value, score, rarity, then stable id', () => {
+    const candidates = [
+      equipment('stable-b', 'weapon', { attack: 5, score: 20, rarity: 'epic' }),
+      equipment('rarity', 'weapon', { attack: 5, score: 20, rarity: 'relic' }),
+      equipment('score', 'weapon', { attack: 5, score: 30, rarity: 'common' }),
+      equipment('primary', 'weapon', { attack: 6, score: 1, rarity: 'common' }),
+      equipment('stable-a', 'weapon', { attack: 5, score: 20, rarity: 'epic' })
+    ];
+
+    expect([...candidates].sort((left, right) =>
+      compareEquipmentByRecommendation(left, right, 'attack')
+    ).map((item) => item.id)).toEqual([
+      'primary', 'score', 'rarity', 'stable-a', 'stable-b'
+    ]);
+  });
+
+  it('equips all recommended slots at once and safely applies the max hp increase', () => {
+    const base = createInitialState();
+    const items = [
+      equipment('best-weapon', 'weapon', { attack: 8, maxHp: 5, score: 20 }),
+      equipment('best-armor', 'armor', { defense: 8, maxHp: 20, score: 20 }),
+      equipment('best-charm', 'charm', { attack: 3, defense: 3, maxHp: 10, score: 20 })
+    ];
+    const state = {
+      ...base,
+      hero: { ...base.hero, hp: 40 },
+      inventory: [...base.inventory, ...items]
+    };
+    const equipped = equipRecommended(state, 'overall');
+
+    expect(equipped.equipped).toEqual({
+      weapon: 'best-weapon', armor: 'best-armor', charm: 'best-charm'
+    });
+    expect(getDerivedStats(equipped).maxHp).toBe(87);
+    expect(equipped.hero.hp).toBe(75);
+    expect(equipped.logs).toHaveLength(state.logs.length + 1);
+    expect(equipped.logs.at(-1)).toContain('おすすめ装備');
+
+    const unchanged = equipRecommended(equipped, 'overall');
+    expect(unchanged).toBe(equipped);
   });
 
   it('cannot equip an unknown item', () => {
@@ -572,6 +719,26 @@ describe('idle RPG loop', () => {
 
     expect(getEnhancementCost(state.inventory[0]!)).toBe(0);
     expect(enhanceItem(state, itemId)).toBe(state);
+  });
+
+  it('returns recommendation success only when the runtime changes equipment', async () => {
+    const base = createInitialState();
+    const betterWeapon = equipment('runtime-best-weapon', 'weapon', {
+      attack: 20,
+      score: 40,
+      rarity: 'epic'
+    });
+    const saved = { ...base, inventory: [...base.inventory, betterWeapon] };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(saved)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    expect(runtime.equipRecommended('attack')).toBe(true);
+    expect(runtime.state.equipped.weapon).toBe(betterWeapon.id);
+    expect(runtime.equipRecommended('attack')).toBe(false);
   });
 
   it('returns enhancement success only when the runtime changes state', async () => {

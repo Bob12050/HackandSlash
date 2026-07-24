@@ -1,5 +1,6 @@
 export type GameMode = 'guild' | 'adventure';
 export type EquipmentSlot = 'weapon' | 'armor' | 'charm';
+export type EquipmentRecommendationMode = 'overall' | 'attack' | 'defense' | 'maxHp';
 export type ItemRarity =
   | 'common'
   | 'uncommon'
@@ -439,6 +440,78 @@ export function getDerivedStats(state: IdleRpgState): DerivedStats {
   );
 }
 
+export function compareEquipmentByRecommendation(
+  left: EquipmentItem,
+  right: EquipmentItem,
+  mode: EquipmentRecommendationMode
+): number {
+  const leftPrimary = recommendationValue(left, mode);
+  const rightPrimary = recommendationValue(right, mode);
+  if (leftPrimary !== rightPrimary) return leftPrimary > rightPrimary ? -1 : 1;
+
+  const leftScore = finiteEquipmentValue(left.score);
+  const rightScore = finiteEquipmentValue(right.score);
+  if (leftScore !== rightScore) return leftScore > rightScore ? -1 : 1;
+
+  const leftRarity = ITEM_RARITIES.indexOf(left.rarity);
+  const rightRarity = ITEM_RARITIES.indexOf(right.rarity);
+  if (leftRarity !== rightRarity) return leftRarity > rightRarity ? -1 : 1;
+
+  if (left.id === right.id) return 0;
+  return left.id < right.id ? -1 : 1;
+}
+
+export function getRecommendedEquipment(
+  state: IdleRpgState,
+  mode: EquipmentRecommendationMode
+): Record<EquipmentSlot, EquipmentItem | null> {
+  return EQUIPMENT_SLOTS.reduce<Record<EquipmentSlot, EquipmentItem | null>>(
+    (recommended, slot) => {
+      recommended[slot] = state.inventory
+        .filter((item) => item.slot === slot)
+        .sort((left, right) => compareEquipmentByRecommendation(left, right, mode))[0] ?? null;
+      return recommended;
+    },
+    { weapon: null, armor: null, charm: null }
+  );
+}
+
+export function equipRecommended(
+  state: IdleRpgState,
+  mode: EquipmentRecommendationMode
+): IdleRpgState {
+  const recommended = getRecommendedEquipment(state, mode);
+  const equipped = { ...state.equipped };
+  let changed = false;
+
+  for (const slot of EQUIPMENT_SLOTS) {
+    const item = recommended[slot];
+    if (item && equipped[slot] !== item.id) {
+      equipped[slot] = item.id;
+      changed = true;
+    }
+  }
+  if (!changed) return state;
+
+  const previousStats = getDerivedStats(state);
+  const next = { ...state, equipped };
+  const nextStats = getDerivedStats(next);
+  const maxHpIncrease = Math.max(0, nextStats.maxHp - previousStats.maxHp);
+  const hp = Math.max(0, Math.min(nextStats.maxHp, state.hero.hp + maxHpIncrease));
+  const modeLabels: Record<EquipmentRecommendationMode, string> = {
+    overall: '総合力',
+    attack: '攻撃',
+    defense: '防御',
+    maxHp: 'HP'
+  };
+
+  return {
+    ...next,
+    hero: { ...state.hero, hp },
+    logs: appendLog(state.logs, `おすすめ装備（${modeLabels[mode]}重視）に一括変更した。`)
+  };
+}
+
 export function startAdventure(state: IdleRpgState, random?: () => number): IdleRpgState;
 export function startAdventure(
   state: IdleRpgState,
@@ -700,8 +773,53 @@ function resolveVictory(
       next = {
         ...next,
         inventory: [...next.inventory, item],
-        logs: appendLog(next.logs, `${item.name}を手に入れた！`)
+        logs: appendLog(
+          next.logs,
+          item.rarity === 'relic'
+            ? `【秘宝発見】${item.name}を手に入れた！`
+            : `${item.name}を手に入れた！`
+        )
       };
+    } else if (item.rarity === 'relic') {
+      const equippedIds = new Set(Object.values(next.equipped).filter((id): id is string => id !== null));
+      const replaceableItem = next.inventory.reduce<EquipmentItem | null>((lowest, candidate) => {
+        if (candidate.locked || equippedIds.has(candidate.id)) return lowest;
+        if (!lowest || finiteEquipmentValue(candidate.score) < finiteEquipmentValue(lowest.score)) {
+          return candidate;
+        }
+        return lowest;
+      }, null);
+
+      if (replaceableItem) {
+        const autoSell = Math.max(3, Math.round(replaceableItem.score * 2));
+        events.push({ type: 'loot-auto-sold', item: replaceableItem, gold: autoSell });
+        events.push({ type: 'loot', item });
+        next = {
+          ...next,
+          hero: { ...next.hero, gold: next.hero.gold + autoSell },
+          inventory: [
+            ...next.inventory.filter((candidate) => candidate.id !== replaceableItem.id),
+            item
+          ],
+          logs: appendLog(
+            appendLog(
+              next.logs,
+              `荷物がいっぱい。${replaceableItem.name}を${autoSell}Gで自動売却。`
+            ),
+            `【秘宝発見】${item.name}を保護して手に入れた！`
+          )
+        };
+      } else {
+        events.push({ type: 'loot', item });
+        next = {
+          ...next,
+          inventory: [...next.inventory, item],
+          logs: appendLog(
+            next.logs,
+            `【秘宝発見】${item.name}を特別保護。保護中の装備だけのため、所持上限を超えて保管した！`
+          )
+        };
+      }
     } else {
       const autoSell = Math.max(3, Math.round(item.score * 2));
       events.push({ type: 'loot-auto-sold', item, gold: autoSell });
@@ -883,6 +1001,14 @@ function normalizedUpgradeLevel(item: EquipmentItem): number {
   const value = Number((item as EquipmentItem & { upgradeLevel?: number }).upgradeLevel);
   if (!Number.isFinite(value)) return 0;
   return Math.min(MAX_ENHANCEMENT_LEVEL, Math.max(0, Math.floor(value)));
+}
+
+function recommendationValue(item: EquipmentItem, mode: EquipmentRecommendationMode): number {
+  return finiteEquipmentValue(mode === 'overall' ? item.score : item[mode]);
+}
+
+function finiteEquipmentValue(value: number): number {
+  return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
 }
 
 function rankForLevel(level: number): HeroState['rank'] {

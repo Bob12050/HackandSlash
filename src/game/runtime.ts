@@ -3,6 +3,7 @@ import {
   createInitialState,
   enhanceItem,
   equipItem,
+  equipRecommended,
   performEnemyAttack,
   performHeroAttack,
   returnToGuild,
@@ -14,6 +15,7 @@ import {
   type AdventureAreaProgress,
   type CombatEvent,
   type EquipmentItem,
+  type EquipmentRecommendationMode,
   type EquipmentSlot,
   type HeroState,
   type IdleRpgState
@@ -60,6 +62,13 @@ class IdleRpgRuntime {
 
   equip(itemId: string): void {
     this.setState(equipItem(this.currentState, itemId));
+  }
+
+  equipRecommended(mode: EquipmentRecommendationMode): boolean {
+    const next = equipRecommended(this.currentState, mode);
+    if (next === this.currentState) return false;
+    this.setState(next);
+    return true;
   }
 
   sell(itemId: string): void {
