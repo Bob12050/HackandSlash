@@ -1,7 +1,9 @@
 import { runtime } from '../game/runtime';
 import {
   INVENTORY_LIMIT,
+  MAX_ENHANCEMENT_LEVEL,
   getDerivedStats,
+  getEnhancementCost,
   type EquipmentItem,
   type EquipmentSlot,
   type IdleRpgState
@@ -88,10 +90,13 @@ export function mountApp(root: HTMLElement): void {
     latestState = state;
     renderState(state, actionPanel);
     if (modal.open && modal.dataset.view === 'equipment' && modalContent.dataset.signature !== equipmentSignature(state)) {
-      renderEquipmentModal(state, modalContent);
+      refreshModalPreservingFocus(modalContent, () => renderEquipmentModal(state, modalContent));
     }
     if (modal.open && modal.dataset.view === 'quest' && modalContent.dataset.signature !== questSignature(state)) {
-      renderQuestModal(state, modalContent);
+      refreshModalPreservingFocus(modalContent, () => renderQuestModal(state, modalContent));
+    }
+    if (modal.open && modal.dataset.view === 'forge' && modalContent.dataset.signature !== forgeSignature(state)) {
+      refreshModalPreservingFocus(modalContent, () => renderForgeModal(state, modalContent));
     }
   });
 
@@ -127,9 +132,13 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
     const action = element.dataset.modalAction;
+    if (element.getAttribute('aria-disabled') === 'true') return;
     if (action === 'close') modal.close();
     if (action === 'equip' && element.dataset.itemId) runtime.equip(element.dataset.itemId);
     if (action === 'sell' && element.dataset.itemId) runtime.sell(element.dataset.itemId);
+    if (action === 'enhance' && element.dataset.itemId) {
+      if (runtime.enhance(element.dataset.itemId)) showToast('装備を強化しました！', 'level-up');
+    }
     if (action === 'claim') runtime.claimQuest();
     if (action === 'reset') {
       const confirmed = window.confirm('冒険の記録を消して、はじめから遊びますか？');
@@ -252,7 +261,7 @@ function openModal(
   if (view === 'equipment') renderEquipmentModal(state, content);
   if (view === 'status') renderStatusModal(state, content);
   if (view === 'quest') renderQuestModal(state, content);
-  if (view === 'forge') renderInfoModal(content, '鍛冶屋', 'fa-hammer', '装備強化は次のアップデートで開店予定です。まずは冒険で、いろいろな装備を集めてみよう。');
+  if (view === 'forge') renderForgeModal(state, content);
   if (view === 'dispatch') renderInfoModal(content, '遠征', 'fa-compass', 'Eランクになると、仲間を送り出して報酬を受け取れるようになります。');
   if (view === 'menu') renderMenuModal(content);
   if (!modal.open) modal.showModal();
@@ -283,7 +292,7 @@ function equipmentRow(item: EquipmentItem, state: IdleRpgState): string {
   return `
     <article class="equipment-row rarity-${item.rarity}">
       <div class="item-icon"><i class="fa-solid ${SLOT_ICONS[item.slot]}" aria-hidden="true"></i></div>
-      <div class="item-copy"><small>${SLOT_LABELS[item.slot]}・Score ${item.score}</small><b>${escapeHtml(item.name)}</b><span>${statParts}</span></div>
+      <div class="item-copy"><small>${SLOT_LABELS[item.slot]}・Score ${item.score}</small><b>${escapeHtml(item.name)}${item.upgradeLevel > 0 ? ` <mark>+${item.upgradeLevel}</mark>` : ''}</b><span>${statParts}</span></div>
       <div class="item-actions">
         <button data-modal-action="equip" data-item-id="${item.id}" ${equipped ? 'disabled' : ''}>${equipped ? '装備中' : '装備'}</button>
         ${!equipped && !item.locked ? `<button class="sell" data-modal-action="sell" data-item-id="${item.id}">売却</button>` : ''}
@@ -327,6 +336,82 @@ function renderQuestModal(state: IdleRpgState, content: HTMLElement): void {
   content.dataset.signature = questSignature(state);
 }
 
+function renderForgeModal(state: IdleRpgState, content: HTMLElement): void {
+  const items = [...state.inventory].sort((a, b) => {
+    const equippedDifference = Number(state.equipped[b.slot] === b.id) - Number(state.equipped[a.slot] === a.id);
+    return equippedDifference || b.upgradeLevel - a.upgradeLevel || b.score - a.score;
+  });
+  content.innerHTML = `
+    ${modalHeader('鍛冶屋', 'fa-hammer', `強化上限 +${MAX_ENHANCEMENT_LEVEL}`)}
+    <div class="forge-intro">
+      <div>
+        <small>所持GOLD</small>
+        <strong><i class="fa-solid fa-coins" aria-hidden="true"></i> ${state.hero.gold.toLocaleString()}G</strong>
+      </div>
+      <p id="forge-description">装備を選んで能力を強化できます。強化した装備は売却するまで効果が残ります。</p>
+    </div>
+    ${items.length > 0 ? `
+      <div class="forge-list" aria-describedby="forge-description">
+        ${items.map((item) => forgeRow(item, state)).join('')}
+      </div>
+    ` : `
+      <div class="forge-empty" role="status">
+        <i class="fa-solid fa-toolbox" aria-hidden="true"></i>
+        <b>強化できる装備がありません</b>
+        <p>冒険で装備を手に入れてから、また鍛冶屋を訪ねてみよう。</p>
+      </div>
+    `}
+  `;
+  content.dataset.signature = forgeSignature(state);
+}
+
+function forgeRow(item: EquipmentItem, state: IdleRpgState): string {
+  const equipped = state.equipped[item.slot] === item.id;
+  const maxed = item.upgradeLevel >= MAX_ENHANCEMENT_LEVEL;
+  const cost = getEnhancementCost(item);
+  const insufficientGold = !maxed && state.hero.gold < cost;
+  const disabledReason = maxed ? '強化上限' : insufficientGold ? 'GOLD不足' : '';
+  const buttonLabel = maxed ? '強化上限' : insufficientGold ? 'GOLD不足' : '強化する';
+  const ability = equipmentAbility(item);
+  const accessibleName = `${item.name}を強化。現在プラス${item.upgradeLevel}、${ability}。${disabledReason || `費用${cost}G`}`;
+  return `
+    <article class="forge-row rarity-${item.rarity}" data-item-id="${escapeHtml(item.id)}">
+      <div class="forge-item-icon"><i class="fa-solid ${SLOT_ICONS[item.slot]}" aria-hidden="true"></i></div>
+      <div class="forge-item-main">
+        <div class="forge-item-meta">
+          <span>${SLOT_LABELS[item.slot]}</span>
+          ${equipped ? '<em><i class="fa-solid fa-circle-check" aria-hidden="true"></i> 装備中</em>' : ''}
+        </div>
+        <b>${escapeHtml(item.name)} <mark>+${item.upgradeLevel}</mark></b>
+        <small>${ability}</small>
+      </div>
+      <div class="forge-cost ${insufficientGold ? 'is-short' : ''} ${maxed ? 'is-max' : ''}">
+        <small>${maxed ? 'MAX' : '次回費用'}</small>
+        <strong>${maxed ? `+${MAX_ENHANCEMENT_LEVEL}` : `${cost.toLocaleString()}G`}</strong>
+      </div>
+      <button
+        class="enhance-button"
+        data-modal-action="enhance"
+        data-item-id="${escapeHtml(item.id)}"
+        aria-label="${escapeHtml(accessibleName)}"
+        aria-disabled="${maxed || insufficientGold}"
+      >
+        <i class="fa-solid ${maxed ? 'fa-crown' : insufficientGold ? 'fa-lock' : 'fa-hammer'}" aria-hidden="true"></i>
+        ${buttonLabel}
+      </button>
+      ${disabledReason ? `<p class="forge-row-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${disabledReason}${insufficientGold ? `・あと${(cost - state.hero.gold).toLocaleString()}G` : ''}</p>` : ''}
+    </article>
+  `;
+}
+
+function equipmentAbility(item: EquipmentItem): string {
+  return [
+    item.attack > 0 ? `ATK +${item.attack}` : '',
+    item.defense > 0 ? `DEF +${item.defense}` : '',
+    item.maxHp > 0 ? `HP +${item.maxHp}` : ''
+  ].filter(Boolean).join(' / ');
+}
+
 function renderInfoModal(content: HTMLElement, title: string, icon: string, copy: string): void {
   content.innerHTML = `${modalHeader(title, icon, 'COMING SOON')}<div class="empty-state"><i class="fa-solid ${icon}"></i><p>${copy}</p></div>`;
 }
@@ -361,13 +446,36 @@ function showToast(message: string, className: string): void {
 
 function equipmentSignature(state: IdleRpgState): string {
   return JSON.stringify({
-    inventory: state.inventory.map((item) => [item.id, item.score]),
+    inventory: state.inventory.map((item) => [item.id, item.score, item.upgradeLevel]),
+    equipped: state.equipped
+  });
+}
+
+function forgeSignature(state: IdleRpgState): string {
+  return JSON.stringify({
+    gold: state.hero.gold,
+    inventory: state.inventory.map((item) => [item.id, item.score, item.upgradeLevel]),
     equipped: state.equipped
   });
 }
 
 function questSignature(state: IdleRpgState): string {
   return `${state.quest.progress}:${state.quest.claimed}:${state.hero.level}:${state.hero.gold}`;
+}
+
+function refreshModalPreservingFocus(content: HTMLElement, render: () => void): void {
+  const activeElement = document.activeElement instanceof HTMLElement && content.contains(document.activeElement)
+    ? document.activeElement
+    : null;
+  const modalAction = activeElement?.dataset.modalAction;
+  const itemId = activeElement?.dataset.itemId;
+  render();
+  if (!modalAction) return;
+  const nextTarget = [...content.querySelectorAll<HTMLElement>('[data-modal-action]')].find((element) => (
+    element.dataset.modalAction === modalAction && element.dataset.itemId === itemId
+  ));
+  const fallback = content.querySelector<HTMLElement>('[data-modal-action="close"]');
+  (nextTarget ?? fallback)?.focus({ preventScroll: true });
 }
 
 function required<T extends HTMLElement>(id: string): T {

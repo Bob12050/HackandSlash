@@ -1,13 +1,19 @@
 import {
   claimQuest,
   createInitialState,
+  enhanceItem,
   equipItem,
   performEnemyAttack,
   performHeroAttack,
   returnToGuild,
   sellItem,
   startAdventure,
+  inventoryScore,
+  MAX_ENHANCEMENT_LEVEL,
   type CombatEvent,
+  type EquipmentItem,
+  type EquipmentSlot,
+  type HeroState,
   type IdleRpgState
 } from './idleRpg';
 
@@ -56,6 +62,13 @@ class IdleRpgRuntime {
 
   sell(itemId: string): void {
     this.setState(sellItem(this.currentState, itemId));
+  }
+
+  enhance(itemId: string): boolean {
+    const next = enhanceItem(this.currentState, itemId);
+    if (next === this.currentState) return false;
+    this.setState(next);
+    return true;
   }
 
   claimQuest(): void {
@@ -124,12 +137,139 @@ class IdleRpgRuntime {
       if (parsed.version !== 1 || !parsed.hero || !parsed.inventory || !parsed.equipped || !parsed.quest) {
         return createInitialState();
       }
-      const restored = parsed as IdleRpgState;
+      const restored = normalizeSavedState(parsed);
+      if (!restored) return createInitialState();
       return returnToGuild(restored, '冒険の記録を読み込んだ。');
     } catch {
       return createInitialState();
     }
   }
+}
+
+function normalizeSavedState(parsed: Partial<IdleRpgState>): IdleRpgState | null {
+  if (parsed.version !== 1 || !isRecord(parsed.hero) || !Array.isArray(parsed.inventory)
+    || !isRecord(parsed.equipped) || !isRecord(parsed.quest)) return null;
+
+  const fallback = createInitialState();
+  const normalizedItems = parsed.inventory
+    .map((item) => normalizeEquipmentItem(item))
+    .filter((item): item is EquipmentItem => item !== null);
+  const inventory = normalizedItems.length > 0 ? deduplicateItems(normalizedItems) : fallback.inventory;
+  const heroSource = parsed.hero as Partial<HeroState>;
+  const hero: HeroState = {
+    level: safeInteger(heroSource.level, fallback.hero.level, 1),
+    xp: safeInteger(heroSource.xp, fallback.hero.xp, 0),
+    nextXp: safeInteger(heroSource.nextXp, fallback.hero.nextXp, 1),
+    hp: safeNumber(heroSource.hp, fallback.hero.hp, 0),
+    maxHp: safeNumber(heroSource.maxHp, fallback.hero.maxHp, 1),
+    baseAttack: safeNumber(heroSource.baseAttack, fallback.hero.baseAttack, 0),
+    baseDefense: safeNumber(heroSource.baseDefense, fallback.hero.baseDefense, 0),
+    gold: safeInteger(heroSource.gold, fallback.hero.gold, 0),
+    rank: isRank(heroSource.rank) ? heroSource.rank : fallback.hero.rank,
+    totalKills: safeInteger(heroSource.totalKills, fallback.hero.totalKills, 0)
+  };
+  const questSource = parsed.quest;
+  const questTarget = safeInteger(questSource.target, fallback.quest.target, 1);
+
+  return {
+    version: 1,
+    mode: 'guild',
+    hero,
+    inventory,
+    equipped: {
+      weapon: normalizeEquippedId(parsed.equipped.weapon, 'weapon', inventory),
+      armor: normalizeEquippedId(parsed.equipped.armor, 'armor', inventory),
+      charm: normalizeEquippedId(parsed.equipped.charm, 'charm', inventory)
+    },
+    enemy: null,
+    distance: 0,
+    adventureKills: 0,
+    encounterCount: safeInteger(parsed.encounterCount, 0, 0),
+    quest: {
+      id: safeText(questSource.id, fallback.quest.id),
+      title: safeText(questSource.title, fallback.quest.title),
+      description: safeText(questSource.description, fallback.quest.description),
+      progress: Math.min(questTarget, safeInteger(questSource.progress, 0, 0)),
+      target: questTarget,
+      rewardGold: safeInteger(questSource.rewardGold, fallback.quest.rewardGold, 0),
+      rewardXp: safeInteger(questSource.rewardXp, fallback.quest.rewardXp, 0),
+      claimed: questSource.claimed === true
+    },
+    logs: Array.isArray(parsed.logs)
+      ? parsed.logs.filter((log): log is string => typeof log === 'string').slice(-60)
+      : fallback.logs
+  };
+}
+
+function normalizeEquipmentItem(value: unknown): EquipmentItem | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0
+    || typeof value.name !== 'string' || value.name.length === 0 || !isSlot(value.slot)) return null;
+  const base = {
+    id: value.id,
+    name: value.name,
+    slot: value.slot,
+    rarity: isRarity(value.rarity) ? value.rarity : 'common' as const,
+    attack: safeInteger(value.attack, 0, 0),
+    defense: safeInteger(value.defense, 0, 0),
+    maxHp: safeInteger(value.maxHp, 0, 0),
+    score: 0,
+    locked: value.locked === true,
+    upgradeLevel: normalizeUpgradeLevel(value.upgradeLevel)
+  };
+  return {
+    ...base,
+    score: safeInteger(value.score, Math.max(0, Math.round(inventoryScore(base))), 0)
+  };
+}
+
+function deduplicateItems(items: EquipmentItem[]): EquipmentItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function normalizeEquippedId(value: unknown, slot: EquipmentSlot, inventory: EquipmentItem[]): string | null {
+  if (typeof value !== 'string') return null;
+  return inventory.some((item) => item.id === value && item.slot === slot) ? value : null;
+}
+
+function safeNumber(value: unknown, fallback: number, minimum: number): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(minimum, numeric) : fallback;
+}
+
+function safeInteger(value: unknown, fallback: number, minimum: number): number {
+  return Math.floor(safeNumber(value, fallback, minimum));
+}
+
+function safeText(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isSlot(value: unknown): value is EquipmentSlot {
+  return value === 'weapon' || value === 'armor' || value === 'charm';
+}
+
+function isRarity(value: unknown): value is EquipmentItem['rarity'] {
+  return value === 'common' || value === 'rare' || value === 'epic';
+}
+
+function isRank(value: unknown): value is HeroState['rank'] {
+  return value === 'F' || value === 'E' || value === 'D' || value === 'C'
+    || value === 'B' || value === 'A' || value === 'S';
+}
+
+function normalizeUpgradeLevel(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.min(MAX_ENHANCEMENT_LEVEL, Math.max(0, Math.floor(numeric)));
 }
 
 export const runtime = new IdleRpgRuntime();

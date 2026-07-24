@@ -1,15 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   claimQuest,
   createInitialState,
+  enhanceItem,
   equipItem,
+  getEnhancementCost,
   getDerivedStats,
   performEnemyAttack,
   performHeroAttack,
   returnToGuild,
   sellItem,
   startAdventure,
+  MAX_ENHANCEMENT_LEVEL,
   type EquipmentItem
 } from '../src/game/idleRpg';
 
@@ -17,6 +20,10 @@ const rolls = (...values: number[]): (() => number) => {
   let index = 0;
   return () => values[index++] ?? values.at(-1) ?? 0;
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('idle RPG loop', () => {
   it('starts at the guild with beginner equipment', () => {
@@ -121,7 +128,7 @@ describe('idle RPG loop', () => {
     const base = createInitialState();
     const armor: EquipmentItem = {
       id: 'armor-1', name: 'test armor', slot: 'armor', rarity: 'rare', attack: 0,
-      defense: 8, maxHp: 12, score: 18, locked: false
+      defense: 8, maxHp: 12, score: 18, locked: false, upgradeLevel: 0
     };
     const state = equipItem({ ...base, inventory: [...base.inventory, armor] }, armor.id);
     expect(state.equipped.armor).toBe(armor.id);
@@ -137,7 +144,7 @@ describe('idle RPG loop', () => {
     const base = createInitialState();
     const charm: EquipmentItem = {
       id: 'charm-1', name: 'test charm', slot: 'charm', rarity: 'common', attack: 1,
-      defense: 1, maxHp: 2, score: 4, locked: false
+      defense: 1, maxHp: 2, score: 4, locked: false, upgradeLevel: 0
     };
     const state = sellItem({ ...base, inventory: [...base.inventory, charm] }, charm.id);
     expect(state.inventory.some((item) => item.id === charm.id)).toBe(false);
@@ -170,5 +177,145 @@ describe('idle RPG loop', () => {
     expect(returned.mode).toBe('guild');
     expect(returned.hero.gold).toBe(99);
     expect(returned.distance).toBe(0);
+  });
+
+  it('enhancement costs rise with each level', () => {
+    const item = createInitialState().inventory[0]!;
+    const firstCost = getEnhancementCost(item);
+    const funded = { ...createInitialState(), hero: { ...createInitialState().hero, gold: 10_000 } };
+    const enhanced = enhanceItem(funded, item.id);
+    expect(getEnhancementCost(enhanced.inventory[0]!)).toBeGreaterThan(firstCost);
+  });
+
+  it('enhances equipment stats and score while spending gold', () => {
+    const base = createInitialState();
+    const item = base.inventory[0]!;
+    const cost = getEnhancementCost(item);
+    const funded = { ...base, hero: { ...base.hero, gold: cost + 100 } };
+    const enhanced = enhanceItem(funded, item.id);
+    const result = enhanced.inventory[0]!;
+
+    expect(result.upgradeLevel).toBe(1);
+    expect(result.attack).toBeGreaterThan(item.attack);
+    expect(result.score).toBeGreaterThan(item.score);
+    expect(enhanced.hero.gold).toBe(100);
+    expect(enhanced.logs.at(-1)).toContain('+1');
+  });
+
+  it('keeps damage taken intact when equipped max hp is enhanced', () => {
+    const base = createInitialState();
+    const armor: EquipmentItem = {
+      id: 'armor-enhance', name: 'test armor', slot: 'armor', rarity: 'common', attack: 0,
+      defense: 3, maxHp: 10, score: 8, locked: false, upgradeLevel: 0
+    };
+    const equipped = equipItem({
+      ...base,
+      hero: { ...base.hero, gold: 10_000 },
+      inventory: [...base.inventory, armor]
+    }, armor.id);
+    const damaged = { ...equipped, hero: { ...equipped.hero, hp: getDerivedStats(equipped).maxHp - 7 } };
+    const enhanced = enhanceItem(damaged, armor.id);
+
+    expect(getDerivedStats(enhanced).maxHp - enhanced.hero.hp).toBe(7);
+    expect(enhanced.hero.hp).toBeGreaterThan(damaged.hero.hp);
+  });
+
+  it('does not change hp when enhancing an unequipped item', () => {
+    const base = createInitialState();
+    const armor: EquipmentItem = {
+      id: 'spare-armor', name: 'spare armor', slot: 'armor', rarity: 'common', attack: 0,
+      defense: 2, maxHp: 8, score: 6, locked: false, upgradeLevel: 0
+    };
+    const state = {
+      ...base,
+      hero: { ...base.hero, gold: 10_000, hp: 31 },
+      inventory: [...base.inventory, armor]
+    };
+    expect(enhanceItem(state, armor.id).hero.hp).toBe(31);
+  });
+
+  it('does not enhance missing equipment or equipment without enough gold', () => {
+    const state = createInitialState();
+    expect(enhanceItem(state, 'missing')).toBe(state);
+    expect(enhanceItem(state, state.inventory[0]!.id)).toBe(state);
+  });
+
+  it('stops enhancement at +10 without spending gold', () => {
+    const base = createInitialState();
+    const capped = {
+      ...base,
+      hero: { ...base.hero, gold: 10_000 },
+      inventory: [{ ...base.inventory[0]!, upgradeLevel: MAX_ENHANCEMENT_LEVEL }]
+    };
+    expect(getEnhancementCost(capped.inventory[0]!)).toBe(0);
+    expect(enhanceItem(capped, capped.inventory[0]!.id)).toBe(capped);
+  });
+
+  it('allows exactly ten enhancements before reaching the cap', () => {
+    const base = createInitialState();
+    let state = { ...base, hero: { ...base.hero, gold: 1_000_000 } };
+    const itemId = state.inventory[0]!.id;
+
+    for (let level = 1; level <= MAX_ENHANCEMENT_LEVEL; level += 1) {
+      state = enhanceItem(state, itemId);
+      expect(state.inventory[0]?.upgradeLevel).toBe(level);
+    }
+
+    expect(getEnhancementCost(state.inventory[0]!)).toBe(0);
+    expect(enhanceItem(state, itemId)).toBe(state);
+  });
+
+  it('returns enhancement success only when the runtime changes state', async () => {
+    const base = createInitialState();
+    const funded = { ...base, hero: { ...base.hero, gold: 1_000 } };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(funded)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    expect(runtime.enhance('missing')).toBe(false);
+    expect(runtime.enhance(runtime.state.inventory[0]!.id)).toBe(true);
+    expect(runtime.state.inventory[0]?.upgradeLevel).toBe(1);
+  });
+
+  it('normalizes malformed saved equipment before calculating forge costs', async () => {
+    const base = createInitialState();
+    const malformed = {
+      ...base,
+      hero: { ...base.hero, gold: 'broken' },
+      inventory: [{ ...base.inventory[0]!, rarity: 'mythic', attack: 'bad', score: null }]
+    };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(malformed)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    const restored = runtime.state.inventory[0]!;
+    expect(restored.rarity).toBe('common');
+    expect(restored.attack).toBe(0);
+    expect(Number.isFinite(restored.score)).toBe(true);
+    expect(Number.isFinite(getEnhancementCost(restored))).toBe(true);
+    expect(runtime.state.hero.gold).toBe(0);
+    expect(runtime.enhance(restored.id)).toBe(false);
+  });
+
+  it('restores old v1 saves with missing enhancement levels as +0', async () => {
+    const oldSave = createInitialState();
+    const legacyItem = { ...oldSave.inventory[0] } as Partial<EquipmentItem>;
+    delete legacyItem.upgradeLevel;
+    const legacySave = { ...oldSave, inventory: [legacyItem] };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(legacySave)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    expect(runtime.state.inventory[0]?.upgradeLevel).toBe(0);
+    expect(runtime.state.mode).toBe('guild');
   });
 });

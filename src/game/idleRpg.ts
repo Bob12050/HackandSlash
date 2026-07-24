@@ -13,6 +13,7 @@ export interface EquipmentItem {
   maxHp: number;
   score: number;
   locked: boolean;
+  upgradeLevel: number;
 }
 
 export interface HeroState {
@@ -87,6 +88,7 @@ export interface CombatStep {
 }
 
 export const INVENTORY_LIMIT = 30;
+export const MAX_ENHANCEMENT_LEVEL = 10;
 
 const RARITY_LABELS: Record<ItemRarity, string> = {
   common: '素朴な',
@@ -116,7 +118,8 @@ export function createInitialState(): IdleRpgState {
     defense: 0,
     maxHp: 0,
     score: 3,
-    locked: true
+    locked: true,
+    upgradeLevel: 0
   };
 
   return {
@@ -263,6 +266,51 @@ export function sellItem(state: IdleRpgState, itemId: string): IdleRpgState {
   };
 }
 
+export function getEnhancementCost(item: EquipmentItem): number {
+  const level = normalizedUpgradeLevel(item);
+  if (level >= MAX_ENHANCEMENT_LEVEL) return 0;
+
+  const rarityMultiplier: Record<ItemRarity, number> = {
+    common: 1,
+    rare: 1.35,
+    epic: 1.8
+  };
+  const score = Number.isFinite(item.score) ? Math.max(1, item.score) : 1;
+  const multiplier = rarityMultiplier[item.rarity] ?? rarityMultiplier.common;
+  const baseValue = 18 + score * 1.8;
+  return Math.max(1, Math.round(baseValue * multiplier * (1 + level * 0.55)));
+}
+
+export function enhanceItem(state: IdleRpgState, itemId: string): IdleRpgState {
+  const itemIndex = state.inventory.findIndex((candidate) => candidate.id === itemId);
+  if (itemIndex < 0) return state;
+
+  const item = state.inventory[itemIndex]!;
+  const upgradeLevel = normalizedUpgradeLevel(item);
+  if (upgradeLevel >= MAX_ENHANCEMENT_LEVEL) return state;
+
+  const cost = getEnhancementCost(item);
+  if (!Number.isFinite(state.hero.gold) || !Number.isFinite(cost) || cost <= 0 || state.hero.gold < cost) return state;
+
+  const previousStats = getDerivedStats(state);
+  const enhanced = growEquipment(item, upgradeLevel + 1);
+  const inventory = state.inventory.map((candidate, index) => index === itemIndex ? enhanced : candidate);
+  const next = {
+    ...state,
+    inventory,
+    hero: { ...state.hero, gold: state.hero.gold - cost }
+  };
+  const nextStats = getDerivedStats(next);
+  const maxHpIncrease = Math.max(0, nextStats.maxHp - previousStats.maxHp);
+  const hp = Math.min(nextStats.maxHp, next.hero.hp + maxHpIncrease);
+
+  return {
+    ...next,
+    hero: { ...next.hero, hp },
+    logs: appendLog(state.logs, `${item.name}を+${enhanced.upgradeLevel}に強化した。-${cost}G`)
+  };
+}
+
 export function claimQuest(state: IdleRpgState): IdleRpgState {
   if (state.quest.claimed || state.quest.progress < state.quest.target) return state;
   const rewarded: IdleRpgState = {
@@ -389,9 +437,39 @@ function createEquipment(level: number, encounterCount: number, random: () => nu
     defense: Math.round(base.defense * multiplier),
     maxHp: Math.round(base.maxHp * multiplier),
     score: 0,
-    locked: false
+    locked: false,
+    upgradeLevel: 0
   };
   return { ...item, score: Math.round(inventoryScore(item)) };
+}
+
+function growEquipment(item: EquipmentItem, upgradeLevel: number): EquipmentItem {
+  let attack = item.attack;
+  let defense = item.defense;
+  let maxHp = item.maxHp;
+
+  if (item.slot === 'weapon') {
+    attack += Math.max(1, Math.ceil(Math.max(1, item.attack) * 0.12));
+  } else if (item.slot === 'armor') {
+    defense += Math.max(1, Math.ceil(Math.max(1, item.defense) * 0.12));
+    maxHp += Math.max(2, Math.ceil(Math.max(1, item.maxHp) * 0.1));
+  } else {
+    attack += Math.max(1, Math.ceil(Math.max(1, item.attack) * 0.1));
+    defense += Math.max(1, Math.ceil(Math.max(1, item.defense) * 0.1));
+    maxHp += Math.max(1, Math.ceil(Math.max(1, item.maxHp) * 0.08));
+  }
+
+  const enhanced = { ...item, attack, defense, maxHp, upgradeLevel };
+  return {
+    ...enhanced,
+    score: Math.max(item.score + 1, Math.round(inventoryScore(enhanced)))
+  };
+}
+
+function normalizedUpgradeLevel(item: EquipmentItem): number {
+  const value = Number((item as EquipmentItem & { upgradeLevel?: number }).upgradeLevel);
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(MAX_ENHANCEMENT_LEVEL, Math.max(0, Math.floor(value)));
 }
 
 function rankForLevel(level: number): HeroState['rank'] {
