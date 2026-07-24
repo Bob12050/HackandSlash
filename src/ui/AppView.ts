@@ -6,6 +6,7 @@ import {
   INVENTORY_LIMIT,
   ITEM_RARITIES,
   MAX_ENHANCEMENT_LEVEL,
+  RELIC_DROP_CHANCES_PER_DEFEAT,
   TOTAL_EQUIPMENT_VARIANTS,
   getDerivedStats,
   getEnhancementCost,
@@ -337,6 +338,7 @@ function renderDestinationModal(state: IdleRpgState, content: HTMLElement): void
           <span class="destination-description">ぷるぷるスライムが暮らす、やさしい風の草原。</span>
           <span class="destination-progress-label">${meadowStatus}</span>
           <span class="destination-progress" aria-hidden="true"><span style="width:${meadowProgress * 10}%"></span></span>
+          <span class="destination-reward relic-rate"><i class="fa-solid fa-gem" aria-hidden="true"></i> 討伐ごと・秘宝 ${formatDropChance(RELIC_DROP_CHANCES_PER_DEFEAT.sunmeadow)}</span>
         </span>
       </button>
       <button
@@ -355,7 +357,7 @@ function renderDestinationModal(state: IdleRpgState, content: HTMLElement): void
           <span id="forest-area-description" class="destination-description">${forestUnlocked
             ? '少し手強い魔物が待つ森。レア装備を見つけやすい。'
             : '草原の「おおきな王冠スライム」を倒すと解放。'}</span>
-          <span class="destination-reward"><i class="fa-solid ${forestUnlocked ? 'fa-gem' : 'fa-crown'}" aria-hidden="true"></i> ${forestUnlocked ? 'レア装備率アップ' : '草原ボス討伐で解放'}</span>
+          <span class="destination-reward relic-rate"><i class="fa-solid fa-gem" aria-hidden="true"></i> ${forestUnlocked ? '討伐ごと・' : '解放後・'}秘宝 ${formatDropChance(RELIC_DROP_CHANCES_PER_DEFEAT['komorebi-forest'])}</span>
         </span>
       </button>
     </div>
@@ -552,6 +554,7 @@ function equipmentCatalogArea(areaId: AdventureAreaId, state: IdleRpgState): str
           <small>${meta.number}</small>
           <h3 id="catalog-area-${areaId}">${AREA_LABELS[areaId]}</h3>
           <p>${unlocked ? meta.description : '王冠スライムを倒すと、装備の名前が明らかになります。'}</p>
+          <strong class="catalog-relic-rate"><i class="fa-solid fa-gem" aria-hidden="true"></i> 討伐1体あたり・秘宝 ${formatDropChance(RELIC_DROP_CHANCES_PER_DEFEAT[areaId])}</strong>
         </span>
         <em>${areaItems.length} BASE<br><b>${areaVariantCount} ITEMS</b></em>
       </header>
@@ -759,6 +762,10 @@ function setText(id: string, value: string): void {
 
 function setWidth(id: string, ratio: number): void {
   required<HTMLElement>(id).style.width = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
+}
+
+function formatDropChance(chance: number): string {
+  return `${Number((chance * 100).toFixed(3))}%`;
 }
 
 function escapeHtml(value: string): string {

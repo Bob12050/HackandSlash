@@ -7,7 +7,8 @@ export type ItemRarity =
   | 'epic'
   | 'legendary'
   | 'mythic'
-  | 'celestial';
+  | 'celestial'
+  | 'relic';
 export type EnemyKind = 'mint-slime' | 'berry-slime' | 'puffball' | 'crown-slime';
 export type AdventureAreaId = 'sunmeadow' | 'komorebi-forest';
 
@@ -149,7 +150,8 @@ export const ITEM_RARITIES: readonly ItemRarity[] = [
   'epic',
   'legendary',
   'mythic',
-  'celestial'
+  'celestial',
+  'relic'
 ];
 
 export const ADVENTURE_AREAS: readonly AdventureAreaDefinition[] = [
@@ -180,7 +182,8 @@ export const EQUIPMENT_RARITY_LABELS: Readonly<Record<ItemRarity, string>> = {
   epic: '星降る',
   legendary: '伝説の',
   mythic: '神話の',
-  celestial: '虹星の'
+  celestial: '虹星の',
+  relic: '秘宝の'
 };
 
 const RARITY_MULTIPLIER: Record<ItemRarity, number> = {
@@ -190,36 +193,68 @@ const RARITY_MULTIPLIER: Record<ItemRarity, number> = {
   epic: 2.55,
   legendary: 3.65,
   mythic: 5,
-  celestial: 6.75
+  celestial: 6.75,
+  relic: 9.25
 };
+
+export const EQUIPMENT_DROP_CHANCES: Readonly<Record<AdventureAreaId, number>> = {
+  sunmeadow: 0.48,
+  'komorebi-forest': 0.62
+};
+
+export const RELIC_DROP_CHANCES_PER_DEFEAT: Readonly<Record<AdventureAreaId, number>> = {
+  sunmeadow: 0.002,
+  'komorebi-forest': 0.004
+};
+
+type NonRelicRarity = Exclude<ItemRarity, 'relic'>;
+
+const NON_RELIC_RARITY_CHANCES: Readonly<
+  Record<AdventureAreaId, readonly { rarity: NonRelicRarity; chance: number }[]>
+> = {
+  sunmeadow: [
+    { rarity: 'common', chance: 0.52 },
+    { rarity: 'uncommon', chance: 0.25 },
+    { rarity: 'rare', chance: 0.13 },
+    { rarity: 'epic', chance: 0.06 },
+    { rarity: 'legendary', chance: 0.028 },
+    { rarity: 'mythic', chance: 0.01 },
+    { rarity: 'celestial', chance: 0.002 }
+  ],
+  'komorebi-forest': [
+    { rarity: 'common', chance: 0.28 },
+    { rarity: 'uncommon', chance: 0.25 },
+    { rarity: 'rare', chance: 0.2 },
+    { rarity: 'epic', chance: 0.13 },
+    { rarity: 'legendary', chance: 0.08 },
+    { rarity: 'mythic', chance: 0.045 },
+    { rarity: 'celestial', chance: 0.015 }
+  ]
+};
+
+function createRarityThresholds(areaId: AdventureAreaId): readonly EquipmentRarityThreshold[] {
+  const relicChanceWithinEquipmentDrops =
+    RELIC_DROP_CHANCES_PER_DEFEAT[areaId] / EQUIPMENT_DROP_CHANCES[areaId];
+  const nonRelicScale = 1 - relicChanceWithinEquipmentDrops;
+  let cumulativeChance = 0;
+  const nonRelicThresholds = NON_RELIC_RARITY_CHANCES[areaId].map(({ rarity, chance }) => {
+    cumulativeChance += chance * nonRelicScale;
+    return { rarity, upperBound: cumulativeChance };
+  });
+  return [...nonRelicThresholds, { rarity: 'relic', upperBound: 1 }];
+}
 
 export const EQUIPMENT_RARITY_THRESHOLDS: Readonly<
   Record<AdventureAreaId, readonly EquipmentRarityThreshold[]>
 > = {
-  sunmeadow: [
-    { rarity: 'common', upperBound: 0.52 },
-    { rarity: 'uncommon', upperBound: 0.77 },
-    { rarity: 'rare', upperBound: 0.9 },
-    { rarity: 'epic', upperBound: 0.96 },
-    { rarity: 'legendary', upperBound: 0.988 },
-    { rarity: 'mythic', upperBound: 0.998 },
-    { rarity: 'celestial', upperBound: 1 }
-  ],
-  'komorebi-forest': [
-    { rarity: 'common', upperBound: 0.28 },
-    { rarity: 'uncommon', upperBound: 0.53 },
-    { rarity: 'rare', upperBound: 0.73 },
-    { rarity: 'epic', upperBound: 0.86 },
-    { rarity: 'legendary', upperBound: 0.94 },
-    { rarity: 'mythic', upperBound: 0.985 },
-    { rarity: 'celestial', upperBound: 1 }
-  ]
+  sunmeadow: createRarityThresholds('sunmeadow'),
+  'komorebi-forest': createRarityThresholds('komorebi-forest')
 };
 
 export function rollEquipmentRarity(areaId: AdventureAreaId, roll: number): ItemRarity {
   const normalizedRoll = clampRoll(roll);
   return EQUIPMENT_RARITY_THRESHOLDS[areaId]
-    .find((threshold) => normalizedRoll < threshold.upperBound)?.rarity ?? 'celestial';
+    .find((threshold) => normalizedRoll < threshold.upperBound)?.rarity ?? 'relic';
 }
 
 export const EQUIPMENT_BASES_BY_AREA: Readonly<
@@ -526,7 +561,8 @@ export function getEnhancementCost(item: EquipmentItem): number {
     epic: 1.8,
     legendary: 2.35,
     mythic: 3,
-    celestial: 3.8
+    celestial: 3.8,
+    relic: 5
   };
   const score = Number.isFinite(item.score) ? Math.max(1, item.score) : 1;
   const multiplier = rarityMultiplier[item.rarity] ?? rarityMultiplier.common;
@@ -816,8 +852,8 @@ function createSunmeadowFirstClearReward(): EquipmentItem {
   return { ...item, score: Math.round(inventoryScore(item)) };
 }
 
-function getAdventureAreaDropChance(areaId: AdventureAreaId): number {
-  return areaId === 'komorebi-forest' ? 0.62 : 0.48;
+export function getAdventureAreaDropChance(areaId: AdventureAreaId): number {
+  return EQUIPMENT_DROP_CHANCES[areaId];
 }
 
 function growEquipment(item: EquipmentItem, upgradeLevel: number): EquipmentItem {

@@ -18,12 +18,14 @@ import {
   EQUIPMENT_BASE_CATALOG,
   EQUIPMENT_BASES_BY_AREA,
   EQUIPMENT_CATALOG,
+  EQUIPMENT_DROP_CHANCES,
   EQUIPMENT_RARITY_LABELS,
   EQUIPMENT_RARITY_THRESHOLDS,
   EQUIPMENT_SLOTS,
   INVENTORY_LIMIT,
   ITEM_RARITIES,
   MAX_ENHANCEMENT_LEVEL,
+  RELIC_DROP_CHANCES_PER_DEFEAT,
   TOTAL_EQUIPMENT_VARIANTS,
   type AdventureAreaId,
   type EquipmentItem
@@ -39,14 +41,14 @@ afterEach(() => {
 });
 
 describe('idle RPG loop', () => {
-  it('publishes an exact 233-item equipment catalog with unique ids and names', () => {
-    expect(TOTAL_EQUIPMENT_VARIANTS).toBe(233);
-    expect(EQUIPMENT_CATALOG).toHaveLength(233);
-    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.id)).size).toBe(233);
-    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.name)).size).toBe(233);
+  it('publishes an exact 266-item equipment catalog with unique ids and names', () => {
+    expect(TOTAL_EQUIPMENT_VARIANTS).toBe(266);
+    expect(EQUIPMENT_CATALOG).toHaveLength(266);
+    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.id)).size).toBe(266);
+    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.name)).size).toBe(266);
     expect(EQUIPMENT_CATALOG.filter((item) => item.source === 'starter')).toHaveLength(1);
     expect(EQUIPMENT_CATALOG.filter((item) => item.source === 'sunmeadow-boss')).toHaveLength(1);
-    expect(EQUIPMENT_CATALOG.filter((item) => item.baseId !== null)).toHaveLength(231);
+    expect(EQUIPMENT_CATALOG.filter((item) => item.baseId !== null)).toHaveLength(264);
   });
 
   it('groups 15 meadow and 18 forest equipment bases evenly across all three slots', () => {
@@ -105,16 +107,13 @@ describe('idle RPG loop', () => {
     ));
   });
 
-  it('uses all seven rarity bands at their documented area boundaries', () => {
-    expect(EQUIPMENT_RARITY_THRESHOLDS.sunmeadow.map((band) => band.upperBound)).toEqual([
-      0.52, 0.77, 0.9, 0.96, 0.988, 0.998, 1
-    ]);
-    expect(EQUIPMENT_RARITY_THRESHOLDS['komorebi-forest'].map((band) => band.upperBound)).toEqual([
-      0.28, 0.53, 0.73, 0.86, 0.94, 0.985, 1
-    ]);
+  it('uses all eight rarity bands and hits the relic rate per defeated enemy', () => {
+    expect(EQUIPMENT_DROP_CHANCES).toEqual({ sunmeadow: 0.48, 'komorebi-forest': 0.62 });
+    expect(RELIC_DROP_CHANCES_PER_DEFEAT).toEqual({ sunmeadow: 0.002, 'komorebi-forest': 0.004 });
 
     for (const areaId of ['sunmeadow', 'komorebi-forest'] satisfies AdventureAreaId[]) {
       const bands = EQUIPMENT_RARITY_THRESHOLDS[areaId];
+      expect(bands.map((band) => band.rarity)).toEqual(ITEM_RARITIES);
       bands.forEach((band, index) => {
         const lowerBound = index === 0 ? 0 : bands[index - 1]!.upperBound;
         expect(rollEquipmentRarity(areaId, lowerBound)).toBe(band.rarity);
@@ -123,8 +122,52 @@ describe('idle RPG loop', () => {
           expect(rollEquipmentRarity(areaId, band.upperBound)).toBe(bands[index + 1]!.rarity);
         }
       });
-      expect(rollEquipmentRarity(areaId, 1)).toBe('celestial');
+      expect(rollEquipmentRarity(areaId, 1)).toBe('relic');
+
+      const relicLowerBound = bands.at(-2)!.upperBound;
+      const relicChanceWithinEquipmentDrops = 1 - relicLowerBound;
+      expect(relicChanceWithinEquipmentDrops * EQUIPMENT_DROP_CHANCES[areaId])
+        .toBeCloseTo(RELIC_DROP_CHANCES_PER_DEFEAT[areaId], 12);
     }
+  });
+
+  it('keeps the previous seven rarity ratios when reserving probability for relics', () => {
+    const originalChances: Record<AdventureAreaId, readonly number[]> = {
+      sunmeadow: [0.52, 0.25, 0.13, 0.06, 0.028, 0.01, 0.002],
+      'komorebi-forest': [0.28, 0.25, 0.2, 0.13, 0.08, 0.045, 0.015]
+    };
+
+    for (const areaId of ['sunmeadow', 'komorebi-forest'] satisfies AdventureAreaId[]) {
+      const bands = EQUIPMENT_RARITY_THRESHOLDS[areaId];
+      const actualChances = bands.slice(0, -1).map((band, index) =>
+        band.upperBound - (index === 0 ? 0 : bands[index - 1]!.upperBound)
+      );
+      actualChances.forEach((chance, index) => {
+        expect(chance / actualChances[0]!).toBeCloseTo(
+          originalChances[areaId][index]! / originalChances[areaId][0]!,
+          12
+        );
+      });
+    }
+  });
+
+  it('makes relic equipment stronger and more expensive to enhance than celestial equipment', () => {
+    const meadowBands = EQUIPMENT_RARITY_THRESHOLDS.sunmeadow;
+    const celestialIndex = ITEM_RARITIES.indexOf('celestial');
+    const relicIndex = ITEM_RARITIES.indexOf('relic');
+    const celestialRoll = (
+      meadowBands[celestialIndex - 1]!.upperBound + meadowBands[celestialIndex]!.upperBound
+    ) / 2;
+    const relicRoll = (
+      meadowBands[relicIndex - 1]!.upperBound + meadowBands[relicIndex]!.upperBound
+    ) / 2;
+    const celestial = createEquipment(1, 1, 'sunmeadow', rolls(0.1, celestialRoll, 0.1, 0.1));
+    const relic = createEquipment(1, 2, 'sunmeadow', rolls(0.1, relicRoll, 0.1, 0.1));
+
+    expect(relic.attack).toBeGreaterThan(celestial.attack);
+    expect(relic.score).toBeGreaterThan(celestial.score);
+    expect(getEnhancementCost({ ...celestial, rarity: 'relic' }))
+      .toBeGreaterThan(getEnhancementCost(celestial));
   });
 
   it('starts at the guild with beginner equipment', () => {

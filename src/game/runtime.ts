@@ -298,7 +298,7 @@ function isSlot(value: unknown): value is EquipmentSlot {
 function isRarity(value: unknown): value is EquipmentItem['rarity'] {
   return value === 'common' || value === 'uncommon' || value === 'rare'
     || value === 'epic' || value === 'legendary' || value === 'mythic'
-    || value === 'celestial';
+    || value === 'celestial' || value === 'relic';
 }
 
 function isAdventureAreaId(value: unknown): value is AdventureAreaId {

@@ -106,6 +106,15 @@ button:focus-visible {
   --rarity-glow: rgb(65 179 167 / 19%);
 }
 
+.rarity-relic {
+  --rarity-border: #e7b84a;
+  --rarity-bg: linear-gradient(110deg, #fff4bd, #ffeaf4 36%, #e9f8ff 68%, #edffef);
+  --rarity-soft: #ffedaf;
+  --rarity-ink: #92601a;
+  --rarity-dot: #e8aa26;
+  --rarity-glow: rgb(221 157 31 / 23%);
+}
+
 .app-shell {
   width: min(100%, 560px);
   min-height: 100vh;
@@ -704,6 +713,22 @@ button:focus-visible {
 .destination-card.is-locked .destination-reward,
 .destination-card.is-locked .destination-reward i { color: #92785d; }
 
+.destination-card .destination-reward.relic-rate {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border: 1px solid #e4bd62;
+  border-radius: 99px;
+  color: #8e5d19;
+  background: linear-gradient(100deg, #fff2b7, #ffeaf5 48%, #e8f9ff);
+  font-family: Arial, sans-serif;
+  font-size: 9px;
+  letter-spacing: .01em;
+}
+
+.destination-card .destination-reward.relic-rate i { color: #d29623; }
+.destination-card.is-locked .destination-reward.relic-rate { opacity: .78; }
+
 .destination-note {
   margin: 12px 3px 0;
   color: #989187;
@@ -1140,6 +1165,21 @@ button:focus-visible {
 }
 .catalog-area-header h3 { margin: 0; color: #3e6153; font-size: 16px; }
 .catalog-area-header p { margin: 2px 0 0; color: #738078; font-size: 8px; line-height: 1.5; }
+.catalog-relic-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border: 1px solid #e2bb55;
+  border-radius: 99px;
+  color: #8d5d17;
+  background: linear-gradient(100deg, #fff1ae, #ffeaf4 48%, #e9f9ff);
+  font-family: Arial, sans-serif;
+  font-size: 7px;
+  line-height: 1.2;
+}
+.catalog-relic-rate i { color: #d19522; }
 .catalog-area-header > em {
   color: #718076;
   font-family: Arial, sans-serif;
