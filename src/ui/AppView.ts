@@ -2,7 +2,9 @@ import { runtime } from '../game/runtime';
 import {
   EQUIPMENT_BASE_CATALOG,
   EQUIPMENT_CATALOG,
+  EQUIPMENT_RARITY_LABELS,
   INVENTORY_LIMIT,
+  ITEM_RARITIES,
   MAX_ENHANCEMENT_LEVEL,
   TOTAL_EQUIPMENT_VARIANTS,
   getDerivedStats,
@@ -508,7 +510,7 @@ function equipmentAbility(item: EquipmentItem): string {
 }
 
 function renderEquipmentCatalogModal(state: IdleRpgState, content: HTMLElement): void {
-  const normalVariantCount = EQUIPMENT_BASE_CATALOG.length * 3;
+  const normalVariantCount = EQUIPMENT_BASE_CATALOG.length * ITEM_RARITIES.length;
   const fixedVariantCount = Math.max(0, TOTAL_EQUIPMENT_VARIANTS - normalVariantCount);
   content.innerHTML = `
     ${modalHeader('装備図鑑', 'fa-book-open', `ALL ${TOTAL_EQUIPMENT_VARIANTS}`)}
@@ -522,12 +524,10 @@ function renderEquipmentCatalogModal(state: IdleRpgState, content: HTMLElement):
       </div>
       <div class="catalog-intro-copy">
         <h3 id="catalog-intro-title">集めるほど、冒険が楽しくなる！</h3>
-        <p>通常のベース装備 <b>${EQUIPMENT_BASE_CATALOG.length}種</b>は、それぞれ3つのレアリティで登場。${fixedVariantCount > 0 ? `さらに冒険・ボス報酬の固定装備${fixedVariantCount}種を加えて、` : ''}全${TOTAL_EQUIPMENT_VARIANTS}種です。</p>
+        <p>通常のベース装備 <b>${EQUIPMENT_BASE_CATALOG.length}種</b>は、それぞれ${ITEM_RARITIES.length}つのレアリティで登場。${fixedVariantCount > 0 ? `さらに冒険・ボス報酬の固定装備${fixedVariantCount}種を加えて、` : ''}全${TOTAL_EQUIPMENT_VARIANTS}種です。</p>
       </div>
-      <div class="catalog-rarity-key" aria-label="3つのレアリティ">
-        <span class="common"><i aria-hidden="true"></i>素朴な</span>
-        <span class="rare"><i aria-hidden="true"></i>きらめく</span>
-        <span class="epic"><i aria-hidden="true"></i>星降る</span>
+      <div class="catalog-rarity-key" aria-label="${ITEM_RARITIES.length}つのレアリティ">
+        ${ITEM_RARITIES.map((rarity) => `<span class="rarity-${rarity}"><i aria-hidden="true"></i>${EQUIPMENT_RARITY_LABELS[rarity]}</span>`).join('')}
       </div>
     </section>
     <div class="equipment-catalog" aria-label="エリア別装備一覧">
@@ -543,7 +543,7 @@ function equipmentCatalogArea(areaId: AdventureAreaId, state: IdleRpgState): str
   const areaItems = EQUIPMENT_BASE_CATALOG.filter((item) => item.areaId === areaId);
   const meta = AREA_CATALOG_META[areaId];
   const unlocked = state.unlockedAreas.includes(areaId);
-  const areaVariantCount = areaItems.length * 3;
+  const areaVariantCount = areaItems.length * ITEM_RARITIES.length;
   return `
     <section class="catalog-area ${unlocked ? '' : 'is-locked'}" aria-labelledby="catalog-area-${areaId}">
       <header class="catalog-area-header">
@@ -570,7 +570,7 @@ function equipmentCatalogSlot(areaId: AdventureAreaId, slot: EquipmentSlot): str
     <section class="catalog-slot-group" aria-labelledby="${headingId}">
       <h4 id="${headingId}">
         <span><i class="fa-solid ${SLOT_ICONS[slot]}" aria-hidden="true"></i>${SLOT_LABELS[slot]}</span>
-        <small>${items.length}種 × 3 RARITIES</small>
+        <small>${items.length}種 × ${ITEM_RARITIES.length} RARITIES</small>
       </h4>
       <ul class="catalog-item-list">
         ${items.map((item) => equipmentCatalogRow(item)).join('')}
@@ -622,7 +622,7 @@ function fixedEquipmentCatalogSection(state: IdleRpgState): string {
                 <b>${visible ? escapeHtml(item.name) : '???'}</b>
                 <small>${starter ? 'はじめから所持' : visible ? '草原ボス初回討伐報酬' : '王冠スライム討伐で解放'}</small>
               </span>
-              <span class="catalog-special-badge ${item.rarity}">${visible ? '固定装備' : 'LOCKED'}</span>
+              <span class="catalog-special-badge rarity-${item.rarity}">${visible ? '固定装備' : 'LOCKED'}</span>
             </li>
           `;
         }).join('')}

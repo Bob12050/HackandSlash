@@ -43,6 +43,69 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+.rarity-common {
+  --rarity-border: #b9c2bb;
+  --rarity-bg: #f8faf7;
+  --rarity-soft: #edf1ed;
+  --rarity-ink: #606d65;
+  --rarity-dot: #96a59b;
+  --rarity-glow: rgb(104 124 111 / 10%);
+}
+
+.rarity-uncommon {
+  --rarity-border: #82c99a;
+  --rarity-bg: #effbf2;
+  --rarity-soft: #ddf4e4;
+  --rarity-ink: #337b50;
+  --rarity-dot: #56ad76;
+  --rarity-glow: rgb(72 164 105 / 13%);
+}
+
+.rarity-rare {
+  --rarity-border: #7fc4e4;
+  --rarity-bg: #eef9ff;
+  --rarity-soft: #dff2fb;
+  --rarity-ink: #347ca2;
+  --rarity-dot: #52a8d2;
+  --rarity-glow: rgb(66 152 194 / 15%);
+}
+
+.rarity-epic {
+  --rarity-border: #b49ae6;
+  --rarity-bg: #f7f1ff;
+  --rarity-soft: #eee4ff;
+  --rarity-ink: #7354b5;
+  --rarity-dot: #9674d5;
+  --rarity-glow: rgb(132 93 202 / 15%);
+}
+
+.rarity-legendary {
+  --rarity-border: #edbb61;
+  --rarity-bg: #fff8df;
+  --rarity-soft: #ffedbd;
+  --rarity-ink: #9e6419;
+  --rarity-dot: #dc982d;
+  --rarity-glow: rgb(207 139 35 / 17%);
+}
+
+.rarity-mythic {
+  --rarity-border: #e997bb;
+  --rarity-bg: #fff1f7;
+  --rarity-soft: #ffe1ee;
+  --rarity-ink: #aa416f;
+  --rarity-dot: #d96498;
+  --rarity-glow: rgb(201 76 132 / 16%);
+}
+
+.rarity-celestial {
+  --rarity-border: #65cbbd;
+  --rarity-bg: linear-gradient(110deg, #eafff8, #f2efff 54%, #fff7d8);
+  --rarity-soft: #def8f1;
+  --rarity-ink: #277f82;
+  --rarity-dot: #52bcaf;
+  --rarity-glow: rgb(65 179 167 / 19%);
+}
+
 .app-shell {
   width: min(100%, 560px);
   min-height: 100vh;
@@ -415,11 +478,11 @@ button:focus-visible {
   width: min(calc(100% - 34px), 480px);
   padding: 13px 16px;
   transform: translate(-50%, 24px);
-  border: 2px solid #e7c17b;
+  border: 2px solid var(--rarity-border, #e7c17b);
   border-radius: 13px;
-  color: #5a4935;
-  background: #fff5cf;
-  box-shadow: 0 7px 22px rgb(70 57 43 / 22%);
+  color: var(--rarity-ink, #5a4935);
+  background: var(--rarity-bg, #fff5cf);
+  box-shadow: 0 7px 22px var(--rarity-glow, rgb(70 57 43 / 22%));
   font-size: 13px;
   font-weight: 700;
   text-align: center;
@@ -428,8 +491,7 @@ button:focus-visible {
   transition: opacity 180ms ease, transform 180ms ease;
 }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
-.toast.rarity-rare { border-color: #75b9dc; background: #e9f7ff; }
-.toast.rarity-epic, .toast.level-up { border-color: #aa8fe3; background: #f3edff; }
+.toast.level-up { border-color: #aa8fe3; color: #664c9e; background: #f3edff; }
 .toast.area-unlocked { border-color: #75b894; background: #ecfaef; }
 .toast.danger { border-color: #e68a8a; background: #fff0eb; }
 
@@ -682,25 +744,24 @@ button:focus-visible {
   gap: 10px;
   align-items: center;
   padding: 10px;
-  border: 2px solid #ddd3c5;
+  border: 2px solid var(--rarity-border, #ddd3c5);
   border-radius: 12px;
-  background: white;
+  background: var(--rarity-bg, white);
+  box-shadow: inset 4px 0 0 var(--rarity-dot, transparent), 0 2px 8px var(--rarity-glow, transparent);
 }
-.equipment-row.rarity-rare { border-color: #8ec8e2; background: #f2fbff; }
-.equipment-row.rarity-epic { border-color: #b9a0e7; background: #f8f3ff; }
 .item-icon {
   display: grid;
   width: 42px;
   height: 42px;
   place-items: center;
   border-radius: 10px;
-  color: var(--violet);
-  background: #eee9fa;
+  color: var(--rarity-ink, var(--violet));
+  background: var(--rarity-soft, #eee9fa);
   font-size: 20px;
 }
 .item-copy { display: flex; min-width: 0; flex-direction: column; }
 .item-copy small { color: var(--muted); font-size: 9px; }
-.item-copy b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.item-copy b { overflow: hidden; color: var(--rarity-ink, var(--ink)); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .item-copy mark { color: #b16440; background: transparent; font-family: Arial, sans-serif; }
 .item-copy span { color: #63736f; font-family: Arial, sans-serif; font-size: 9px; }
 .item-actions { display: flex; flex-direction: column; gap: 4px; }
@@ -803,13 +864,11 @@ button:focus-visible {
   align-items: center;
   gap: 7px 10px;
   padding: 11px;
-  border: 2px solid #ddd3c5;
+  border: 2px solid var(--rarity-border, #ddd3c5);
   border-radius: 12px;
-  background: white;
+  background: var(--rarity-bg, white);
+  box-shadow: inset 4px 0 0 var(--rarity-dot, transparent), 0 2px 8px var(--rarity-glow, transparent);
 }
-
-.forge-row.rarity-rare { border-color: #8ec8e2; background: #f2fbff; }
-.forge-row.rarity-epic { border-color: #b9a0e7; background: #f8f3ff; }
 
 .forge-item-icon {
   display: grid;
@@ -817,8 +876,8 @@ button:focus-visible {
   height: 42px;
   place-items: center;
   border-radius: 10px;
-  color: #9b6c39;
-  background: #f7ead7;
+  color: var(--rarity-ink, #9b6c39);
+  background: var(--rarity-soft, #f7ead7);
   font-size: 20px;
 }
 
@@ -850,6 +909,7 @@ button:focus-visible {
 
 .forge-item-main > b {
   overflow: hidden;
+  color: var(--rarity-ink, var(--ink));
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1001,8 +1061,8 @@ button:focus-visible {
 
 .catalog-rarity-key {
   grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 6px;
   padding-top: 8px;
   border-top: 1px dashed #decda8;
@@ -1010,23 +1070,29 @@ button:focus-visible {
 
 .catalog-rarity-key span {
   display: inline-flex;
-  min-height: 25px;
+  min-width: 0;
+  min-height: 30px;
   align-items: center;
   gap: 5px;
   padding: 4px 8px;
-  border: 1px solid #ddd3c5;
+  border: 1px solid var(--rarity-border, #ddd3c5);
   border-radius: 99px;
-  color: #706a62;
-  background: white;
+  color: var(--rarity-ink, #706a62);
+  background: var(--rarity-bg, white);
+  box-shadow: inset 3px 0 0 var(--rarity-dot, transparent);
   font-size: 8px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.catalog-rarity-key i { width: 7px; height: 7px; border-radius: 50%; background: #aaa296; }
-.catalog-rarity-key .rare { border-color: #a4d1e6; color: #397b9b; background: #f0faff; }
-.catalog-rarity-key .rare i { background: #55a7d0; }
-.catalog-rarity-key .epic { border-color: #c6b2ec; color: #7054ae; background: #f7f1ff; }
-.catalog-rarity-key .epic i { background: #9272d1; }
+.catalog-rarity-key i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--rarity-dot, #aaa296);
+  box-shadow: 0 0 0 2px var(--rarity-soft, transparent);
+}
 
 .equipment-catalog {
   display: flex;
@@ -1263,16 +1329,16 @@ button:focus-visible {
 
 .catalog-special-badge {
   padding: 4px 7px;
+  border: 1px solid var(--rarity-border, transparent);
   border-radius: 99px;
-  color: #81601f;
-  background: #fff0b9;
+  color: var(--rarity-ink, #81601f);
+  background: var(--rarity-bg, #fff0b9);
   font-family: Arial, sans-serif;
   font-size: 7px;
   font-weight: 800;
   white-space: nowrap;
 }
-.catalog-special-badge.epic { color: #6f52ac; background: #eee5ff; }
-.catalog-special-list .is-secret .catalog-special-badge { color: #827c73; background: #dfdbd4; }
+.catalog-special-list .is-secret .catalog-special-badge { border-color: #c9c3ba; color: #827c73; background: #dfdbd4; }
 
 .catalog-footnote {
   margin: 11px 3px 2px;
@@ -1364,7 +1430,7 @@ button:focus-visible {
     border-right: 0;
     border-bottom: 1px solid #e7d6aa;
   }
-  .catalog-rarity-key { grid-column: 1; }
+  .catalog-rarity-key { grid-column: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .catalog-area-header { grid-template-columns: 40px minmax(0, 1fr); }
   .catalog-area-icon { width: 40px; height: 40px; }
   .catalog-area-header > em { grid-column: 2; text-align: left; }

@@ -11,6 +11,7 @@ import {
   performEnemyAttack,
   performHeroAttack,
   returnToGuild,
+  rollEquipmentRarity,
   sellItem,
   startAdventure,
   AREA_BOSS_KILL_TARGET,
@@ -18,6 +19,7 @@ import {
   EQUIPMENT_BASES_BY_AREA,
   EQUIPMENT_CATALOG,
   EQUIPMENT_RARITY_LABELS,
+  EQUIPMENT_RARITY_THRESHOLDS,
   EQUIPMENT_SLOTS,
   INVENTORY_LIMIT,
   ITEM_RARITIES,
@@ -37,14 +39,14 @@ afterEach(() => {
 });
 
 describe('idle RPG loop', () => {
-  it('publishes an exact 101-item equipment catalog with unique ids and names', () => {
-    expect(TOTAL_EQUIPMENT_VARIANTS).toBe(101);
-    expect(EQUIPMENT_CATALOG).toHaveLength(101);
-    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.id)).size).toBe(101);
-    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.name)).size).toBe(101);
+  it('publishes an exact 233-item equipment catalog with unique ids and names', () => {
+    expect(TOTAL_EQUIPMENT_VARIANTS).toBe(233);
+    expect(EQUIPMENT_CATALOG).toHaveLength(233);
+    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.id)).size).toBe(233);
+    expect(new Set(EQUIPMENT_CATALOG.map((item) => item.name)).size).toBe(233);
     expect(EQUIPMENT_CATALOG.filter((item) => item.source === 'starter')).toHaveLength(1);
     expect(EQUIPMENT_CATALOG.filter((item) => item.source === 'sunmeadow-boss')).toHaveLength(1);
-    expect(EQUIPMENT_CATALOG.filter((item) => item.baseId !== null)).toHaveLength(99);
+    expect(EQUIPMENT_CATALOG.filter((item) => item.baseId !== null)).toHaveLength(231);
   });
 
   it('groups 15 meadow and 18 forest equipment bases evenly across all three slots', () => {
@@ -65,11 +67,6 @@ describe('idle RPG loop', () => {
       armor: 0.5,
       charm: 0.9
     };
-    const rarityRolls: Record<(typeof ITEM_RARITIES)[number], number> = {
-      common: 0.1,
-      rare: 0.8,
-      epic: 0.99
-    };
     const generatedNames = new Set<string>();
 
     for (const areaId of ['sunmeadow', 'komorebi-forest'] satisfies AdventureAreaId[]) {
@@ -77,11 +74,16 @@ describe('idle RPG loop', () => {
         const pool = EQUIPMENT_BASES_BY_AREA[areaId][slot];
         pool.forEach((base, index) => {
           for (const rarity of ITEM_RARITIES) {
+            const rarityIndex = ITEM_RARITIES.indexOf(rarity);
+            const lowerBound = rarityIndex === 0
+              ? 0
+              : EQUIPMENT_RARITY_THRESHOLDS[areaId][rarityIndex - 1]!.upperBound;
+            const upperBound = EQUIPMENT_RARITY_THRESHOLDS[areaId][rarityIndex]!.upperBound;
             const item = createEquipment(
               areaId === 'komorebi-forest' ? 4 : 1,
               generatedNames.size + 1,
               areaId,
-              rolls(slotRolls[slot], rarityRolls[rarity], (index + 0.1) / pool.length, 0.25)
+              rolls(slotRolls[slot], (lowerBound + upperBound) / 2, (index + 0.1) / pool.length, 0.25)
             );
             expect(item.name).toBe(`${EQUIPMENT_RARITY_LABELS[rarity]}${base.name}`);
             expect(item.slot).toBe(slot);
@@ -101,6 +103,28 @@ describe('idle RPG loop', () => {
     expect(generatedNames).toEqual(new Set(
       EQUIPMENT_CATALOG.filter((item) => item.baseId !== null).map((item) => item.name)
     ));
+  });
+
+  it('uses all seven rarity bands at their documented area boundaries', () => {
+    expect(EQUIPMENT_RARITY_THRESHOLDS.sunmeadow.map((band) => band.upperBound)).toEqual([
+      0.52, 0.77, 0.9, 0.96, 0.988, 0.998, 1
+    ]);
+    expect(EQUIPMENT_RARITY_THRESHOLDS['komorebi-forest'].map((band) => band.upperBound)).toEqual([
+      0.28, 0.53, 0.73, 0.86, 0.94, 0.985, 1
+    ]);
+
+    for (const areaId of ['sunmeadow', 'komorebi-forest'] satisfies AdventureAreaId[]) {
+      const bands = EQUIPMENT_RARITY_THRESHOLDS[areaId];
+      bands.forEach((band, index) => {
+        const lowerBound = index === 0 ? 0 : bands[index - 1]!.upperBound;
+        expect(rollEquipmentRarity(areaId, lowerBound)).toBe(band.rarity);
+        expect(rollEquipmentRarity(areaId, (lowerBound + band.upperBound) / 2)).toBe(band.rarity);
+        if (index < bands.length - 1) {
+          expect(rollEquipmentRarity(areaId, band.upperBound)).toBe(bands[index + 1]!.rarity);
+        }
+      });
+      expect(rollEquipmentRarity(areaId, 1)).toBe('celestial');
+    }
   });
 
   it('starts at the guild with beginner equipment', () => {
@@ -527,7 +551,7 @@ describe('idle RPG loop', () => {
     const malformed = {
       ...base,
       hero: { ...base.hero, gold: 'broken' },
-      inventory: [{ ...base.inventory[0]!, rarity: 'mythic', attack: 'bad', score: null }]
+      inventory: [{ ...base.inventory[0]!, rarity: 'void-rarity', attack: 'bad', score: null }]
     };
     vi.stubGlobal('localStorage', {
       getItem: vi.fn(() => JSON.stringify(malformed)),
@@ -543,6 +567,27 @@ describe('idle RPG loop', () => {
     expect(Number.isFinite(getEnhancementCost(restored))).toBe(true);
     expect(runtime.state.hero.gold).toBe(0);
     expect(runtime.enhance(restored.id)).toBe(false);
+  });
+
+  it('keeps every supported rarity unchanged when loading a save', async () => {
+    const base = createInitialState();
+    const savedRarities = ITEM_RARITIES;
+    const legacySave = {
+      ...base,
+      inventory: savedRarities.map((rarity, index) => ({
+        ...base.inventory[0]!,
+        id: index === 0 ? 'starter-weapon' : `legacy-${rarity}`,
+        rarity
+      }))
+    };
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify(legacySave)),
+      setItem: vi.fn()
+    });
+    vi.resetModules();
+
+    const { runtime } = await import('../src/game/runtime');
+    expect(runtime.state.inventory.map((item) => item.rarity)).toEqual(savedRarities);
   });
 
   it('migrates old v1 saves without area progress to the meadow defaults', async () => {

@@ -1,6 +1,13 @@
 export type GameMode = 'guild' | 'adventure';
 export type EquipmentSlot = 'weapon' | 'armor' | 'charm';
-export type ItemRarity = 'common' | 'rare' | 'epic';
+export type ItemRarity =
+  | 'common'
+  | 'uncommon'
+  | 'rare'
+  | 'epic'
+  | 'legendary'
+  | 'mythic'
+  | 'celestial';
 export type EnemyKind = 'mint-slime' | 'berry-slime' | 'puffball' | 'crown-slime';
 export type AdventureAreaId = 'sunmeadow' | 'komorebi-forest';
 
@@ -49,6 +56,11 @@ export interface EquipmentCatalogEntry {
   rarity: ItemRarity;
   source: AdventureAreaId | 'starter' | 'sunmeadow-boss';
   baseId: string | null;
+}
+
+export interface EquipmentRarityThreshold {
+  rarity: ItemRarity;
+  upperBound: number;
 }
 
 export interface HeroState {
@@ -130,7 +142,15 @@ export const INVENTORY_LIMIT = 30;
 export const MAX_ENHANCEMENT_LEVEL = 10;
 export const AREA_BOSS_KILL_TARGET = 10;
 export const EQUIPMENT_SLOTS: readonly EquipmentSlot[] = ['weapon', 'armor', 'charm'];
-export const ITEM_RARITIES: readonly ItemRarity[] = ['common', 'rare', 'epic'];
+export const ITEM_RARITIES: readonly ItemRarity[] = [
+  'common',
+  'uncommon',
+  'rare',
+  'epic',
+  'legendary',
+  'mythic',
+  'celestial'
+];
 
 export const ADVENTURE_AREAS: readonly AdventureAreaDefinition[] = [
   {
@@ -155,15 +175,52 @@ export const ADVENTURE_AREAS: readonly AdventureAreaDefinition[] = [
 
 export const EQUIPMENT_RARITY_LABELS: Readonly<Record<ItemRarity, string>> = {
   common: '素朴な',
+  uncommon: '磨かれた',
   rare: 'きらめく',
-  epic: '星降る'
+  epic: '星降る',
+  legendary: '伝説の',
+  mythic: '神話の',
+  celestial: '虹星の'
 };
 
 const RARITY_MULTIPLIER: Record<ItemRarity, number> = {
   common: 1,
+  uncommon: 1.25,
   rare: 1.65,
-  epic: 2.55
+  epic: 2.55,
+  legendary: 3.65,
+  mythic: 5,
+  celestial: 6.75
 };
+
+export const EQUIPMENT_RARITY_THRESHOLDS: Readonly<
+  Record<AdventureAreaId, readonly EquipmentRarityThreshold[]>
+> = {
+  sunmeadow: [
+    { rarity: 'common', upperBound: 0.52 },
+    { rarity: 'uncommon', upperBound: 0.77 },
+    { rarity: 'rare', upperBound: 0.9 },
+    { rarity: 'epic', upperBound: 0.96 },
+    { rarity: 'legendary', upperBound: 0.988 },
+    { rarity: 'mythic', upperBound: 0.998 },
+    { rarity: 'celestial', upperBound: 1 }
+  ],
+  'komorebi-forest': [
+    { rarity: 'common', upperBound: 0.28 },
+    { rarity: 'uncommon', upperBound: 0.53 },
+    { rarity: 'rare', upperBound: 0.73 },
+    { rarity: 'epic', upperBound: 0.86 },
+    { rarity: 'legendary', upperBound: 0.94 },
+    { rarity: 'mythic', upperBound: 0.985 },
+    { rarity: 'celestial', upperBound: 1 }
+  ]
+};
+
+export function rollEquipmentRarity(areaId: AdventureAreaId, roll: number): ItemRarity {
+  const normalizedRoll = clampRoll(roll);
+  return EQUIPMENT_RARITY_THRESHOLDS[areaId]
+    .find((threshold) => normalizedRoll < threshold.upperBound)?.rarity ?? 'celestial';
+}
 
 export const EQUIPMENT_BASES_BY_AREA: Readonly<
   Record<AdventureAreaId, Readonly<Record<EquipmentSlot, readonly EquipmentBaseDefinition[]>>>
@@ -464,8 +521,12 @@ export function getEnhancementCost(item: EquipmentItem): number {
 
   const rarityMultiplier: Record<ItemRarity, number> = {
     common: 1,
+    uncommon: 1.15,
     rare: 1.35,
-    epic: 1.8
+    epic: 1.8,
+    legendary: 2.35,
+    mythic: 3,
+    celestial: 3.8
   };
   const score = Number.isFinite(item.score) ? Math.max(1, item.score) : 1;
   const multiplier = rarityMultiplier[item.rarity] ?? rarityMultiplier.common;
@@ -718,10 +779,7 @@ export function createEquipment(
 ): EquipmentItem {
   const slotRoll = clampRoll(random());
   const slot: EquipmentSlot = slotRoll < 0.4 ? 'weapon' : slotRoll < 0.75 ? 'armor' : 'charm';
-  const rarityRoll = clampRoll(random());
-  const rarity: ItemRarity = areaId === 'komorebi-forest'
-    ? rarityRoll < 0.48 ? 'common' : rarityRoll < 0.89 ? 'rare' : 'epic'
-    : rarityRoll < 0.72 ? 'common' : rarityRoll < 0.95 ? 'rare' : 'epic';
+  const rarity = rollEquipmentRarity(areaId, random());
   const basePool = EQUIPMENT_BASES_BY_AREA[areaId][slot];
   const baseIndex = Math.floor(clampRoll(random()) * basePool.length);
   const base = basePool[baseIndex]!;
